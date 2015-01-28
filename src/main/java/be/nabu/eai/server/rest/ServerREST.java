@@ -48,7 +48,7 @@ public class ServerREST {
 	@Path("/invoke/{service}")
 	@POST
 	public Part invoke(@PathParam("service") String serviceId, InputStream content, Header...headers) throws IOException, ParseException, ServiceException {
-		DefinedService service = (DefinedService) repository.getNode(serviceId);
+		DefinedService service = (DefinedService) repository.getNode(serviceId).getArtifact();
 		if (service == null) {
 			throw new IllegalArgumentException("Can not find a service with the id: " + serviceId);
 		}
@@ -91,5 +91,11 @@ public class ServerREST {
 	@Path("/settings/repository")
 	public URI getRepository() {
 		return server.getRepositoryRoot();
+	}
+	
+	@GET
+	@Path("/settings/maven")
+	public URI getMaven() {
+		return server.getMavenRoot();
 	}
 }

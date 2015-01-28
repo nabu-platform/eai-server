@@ -17,11 +17,15 @@ import org.slf4j.LoggerFactory;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.events.NodeEvent;
+import be.nabu.eai.repository.managers.MavenManager;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.events.api.EventHandler;
+import be.nabu.libs.maven.CreateResourceRepositoryEvent;
+import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
+import be.nabu.libs.maven.MavenListener;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.services.ServiceRunnable;
@@ -32,6 +36,8 @@ import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.services.maven.MavenArtifact;
+import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.utils.http.api.HTTPRequest;
 import be.nabu.utils.http.api.server.HTTPServer;
@@ -46,16 +52,18 @@ public class Server implements ServiceRunner {
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 
-	private HTTPServer server;
-
 	private RoleHandler roleHandler;
 	
-	public Server(HTTPServer server, RoleHandler roleHandler, ResourceContainer<?> root) throws IOException {
-		this.server = server;
+	public Server(RoleHandler roleHandler, ResourceContainer<?> repositoryRoot, ResourceContainer<?> mavenRoot) throws IOException {
 		this.roleHandler = roleHandler;
-		this.repository = new EAIResourceRepository(root);
+		this.repository = new EAIResourceRepository(repositoryRoot, mavenRoot);
 		this.repository.setServiceRunner(this);
 		initialize();
+	}
+
+	public void enableREST(HTTPServer server) {
+		// make sure we intercept invoke commands
+		server.getEventDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
 	}
 	
 	public void initialize() {
@@ -119,9 +127,50 @@ public class Server implements ServiceRunner {
 				return null;
 			}
 		});
-		
-		// make sure we intercept invoke commands
-		server.getEventDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
+	}
+	
+	public void enableMaven(HTTPServer server) {
+		repository.getEventDispatcher().subscribe(DeleteResourceRepositoryEvent.class, new EventHandler<DeleteResourceRepositoryEvent, Void>() {
+			@Override
+			public Void handle(DeleteResourceRepositoryEvent event) {
+				logger.info("Deleting maven artifact " + event.getArtifact().getArtifactId());
+				MavenManager manager = new MavenManager(DefinedTypeResolverFactory.getInstance().getResolver());
+				try {
+					manager.removeChildren(repository.getRoot(), manager.load(repository.getMavenRepository(), event.getArtifact(), repository.getLocalMavenServer(), repository.isUpdateMavenSnapshots()));
+				}
+				catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+				return null;
+			}
+		}).filter(new EventHandler<DeleteResourceRepositoryEvent, Boolean>() {
+			@Override
+			public Boolean handle(DeleteResourceRepositoryEvent event) {
+				return !event.isInternal();
+			}
+		});
+		repository.getEventDispatcher().subscribe(CreateResourceRepositoryEvent.class, new EventHandler<CreateResourceRepositoryEvent, Void>() {
+			@Override
+			public Void handle(CreateResourceRepositoryEvent event) {
+				logger.info("Installing maven artifact " + event.getArtifact().getArtifactId());
+				MavenManager manager = new MavenManager(DefinedTypeResolverFactory.getInstance().getResolver());
+				MavenArtifact artifact = manager.load(repository.getMavenRepository(), event.getArtifact(), repository.getLocalMavenServer(), repository.isUpdateMavenSnapshots());
+				try {
+					manager.addChildren(repository.getRoot(), artifact);
+				}
+				catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+				return null;
+			}
+		}).filter(new EventHandler<CreateResourceRepositoryEvent, Boolean>() {
+			@Override
+			public Boolean handle(CreateResourceRepositoryEvent event) {
+				return !event.isInternal();
+			}
+		});
+		// no support for non-root calls atm!
+		server.getEventDispatcher().subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
 	private void start(StartableArtifact artifact) {
@@ -218,10 +267,21 @@ public class Server implements ServiceRunner {
 	
 	public void start() throws IOException {
 		repository.start();
-		server.start();
 	}
 	
 	public URI getRepositoryRoot() {
 		return ResourceUtils.getURI(repository.getRoot().getContainer());
+	}
+	
+	public URI getMavenRoot() {
+		return ResourceUtils.getURI(repository.getMavenRoot());
+	}
+	
+	public void setLocalMavenServer(URI uri) {
+		repository.setLocalMavenServer(uri);
+	}
+	
+	public void setUpdateMavenSnapshots(boolean update) {
+		repository.setUpdateMavenSnapshots(update);
 	}
 }

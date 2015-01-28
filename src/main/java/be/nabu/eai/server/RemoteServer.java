@@ -2,6 +2,7 @@ package be.nabu.eai.server;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
@@ -49,7 +50,15 @@ public class RemoteServer implements ServiceRunner {
 	}
 	
 	public URI getRepositoryRoot() throws IOException, FormatException, ParseException, URISyntaxException {
-		URI target = URIUtils.getChild(endpoint, "/settings/repository");
+		return new URI(URIUtils.encodeURI(getSetting("repository")));
+	}
+	
+	public URI getMavenRoot() throws IOException, FormatException, ParseException, URISyntaxException {
+		return new URI(URIUtils.encodeURI(getSetting("maven")));
+	}
+
+	private String getSetting(String name) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
+		URI target = URIUtils.getChild(endpoint, "/settings/" + name);
 		DefaultHTTPRequest request = new DefaultHTTPRequest(
 			"GET",
 			target.getPath(),
@@ -73,7 +82,7 @@ public class RemoteServer implements ServiceRunner {
 		if (!(response.getContent() instanceof ContentPart)) {
 			throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
 		}
-		return new URI(URIUtils.encodeURI(new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8"))); 
+		return new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8");
 	}
 
 	@Override

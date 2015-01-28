@@ -33,9 +33,15 @@ public class Standalone {
 			System.getProperties().putAll(properties);
 		}
 		
-		int port = new Integer(getArgument("port", "5001", args));
+		int port = new Integer(getArgument("port", "5555", args));
 		int listenerPoolSize = new Integer(getArgument("listenerPoolSize", "20", args));
 
+		URI maven = new URI(URIUtils.encodeURI(getMandatoryArgument("maven", args)));
+		ResourceContainer<?> mavenRoot = (ResourceContainer<?>) ResourceFactory.getInstance().resolve(maven, null);
+		if (mavenRoot == null) {
+			throw new IOException("The directory for the maven repository does not exist: " + maven);
+		}
+		
 		URI repository = new URI(URIUtils.encodeURI(getMandatoryArgument("repository", args)));
 		ResourceContainer<?> repositoryRoot = (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository, null);
 		if (repositoryRoot == null) {
@@ -47,9 +53,29 @@ public class Standalone {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
 		}
 
-		HTTPServer http = new DefaultHTTPServer(port, listenerPoolSize, new EventDispatcherImpl());
-		Server server = new Server(http, roleHandler, repositoryRoot);
+		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
+		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
+		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
+		
+		String localMavenServer = getArgument("localMavenServer", null, args);
+		
+		Server server = new Server(roleHandler, repositoryRoot, mavenRoot);
+		if (localMavenServer != null) {
+			server.setLocalMavenServer(new URI(URIUtils.encodeURI(localMavenServer)));
+			server.setUpdateMavenSnapshots(updateMavenSnapshots);
+		}
 		server.start();
+		
+		if (enableREST || enableMaven) {
+			HTTPServer http = new DefaultHTTPServer(port, listenerPoolSize, new EventDispatcherImpl());
+			if (enableREST) {
+				server.enableREST(http);
+			}
+			if (enableMaven) {
+				server.enableMaven(http);
+			}
+			http.start();
+		}
 	}
 	
 	public static String getArgument(String name, String defaultValue, String...args) {
