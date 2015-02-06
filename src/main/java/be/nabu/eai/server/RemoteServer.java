@@ -31,6 +31,7 @@ import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.ContentPart;
 import be.nabu.utils.mime.impl.FormatException;
 import be.nabu.utils.mime.impl.MimeHeader;
+import be.nabu.utils.mime.impl.MimeUtils;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
 import be.nabu.utils.mime.impl.PlainMimeEmptyPart;
 
@@ -123,9 +124,11 @@ public class RemoteServer implements ServiceRunner {
 			if (!(response.getContent() instanceof ContentPart)) {
 				throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
 			}
-			
-			XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
-			result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+			// it is possible that the result is simply empty (null) e.g. if the service is a java method with return type void
+			if (!Long.valueOf(0).equals(MimeUtils.getContentLength(response.getContent().getHeaders()))) {
+				XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
+				result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+			}
 		}
 		catch (FormatException e) {
 			exception = new ServiceException(e);
