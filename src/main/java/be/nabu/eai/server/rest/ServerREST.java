@@ -17,6 +17,9 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.SecurityContext;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.server.Server;
@@ -39,6 +42,8 @@ import be.nabu.utils.mime.impl.PlainMimeEmptyPart;
 
 public class ServerREST {
 	
+	private Logger logger = LoggerFactory.getLogger(getClass());
+	
 	@Context
 	private Repository repository;
 	
@@ -47,9 +52,22 @@ public class ServerREST {
 	
 	private SecurityContext securityContext;
 	
+	@Path("/reload/{id}")
+	@GET
+	public void reload(@PathParam("id") String id) {
+		repository.reload(id);
+	}
+	
+	@Path("/unload/{id}")
+	@GET
+	public void unload(@PathParam("id") String id) {
+		repository.unload(id);
+	}
+	
 	@Path("/invoke/{service}")
 	@POST
 	public Part invoke(@PathParam("service") String serviceId, InputStream content, Header...headers) throws IOException, ParseException, ServiceException {
+		logger.debug("Invoking: {}", serviceId);
 		Node node = repository.getNode(serviceId);
 		if (node == null) {
 			throw new IllegalArgumentException("Can not find the node: " + serviceId);
@@ -88,6 +106,7 @@ public class ServerREST {
 				ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 				marshallable.marshal(bytes, output);
 				byte[] byteArray = bytes.toByteArray();
+				logger.trace("Response: {}", new String(byteArray));
 				return new PlainMimeContentPart(null, IOUtils.wrap(byteArray, true), 
 					new MimeHeader("Content-Length", Integer.valueOf(byteArray.length).toString()),
 					new MimeHeader("Content-Type", marshallable instanceof JSONBinding ? MediaType.APPLICATION_JSON : MediaType.APPLICATION_XML)

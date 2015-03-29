@@ -25,6 +25,7 @@ import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.utils.http.DefaultHTTPRequest;
 import be.nabu.utils.http.HTTPUtils;
 import be.nabu.utils.http.api.AuthenticationHandler;
+import be.nabu.utils.http.api.HTTPRequest;
 import be.nabu.utils.http.api.HTTPResponse;
 import be.nabu.utils.http.api.client.HTTPClient;
 import be.nabu.utils.io.IOUtils;
@@ -33,7 +34,6 @@ import be.nabu.utils.mime.impl.FormatException;
 import be.nabu.utils.mime.impl.MimeHeader;
 import be.nabu.utils.mime.impl.MimeUtils;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
-import be.nabu.utils.mime.impl.PlainMimeEmptyPart;
 
 public class RemoteServer implements ServiceRunner {
 	
@@ -58,16 +58,35 @@ public class RemoteServer implements ServiceRunner {
 		return new URI(URIUtils.encodeURI(getSetting("maven")));
 	}
 
+	public void reload(String id) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/reload/" + id);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
+	public void unload(String id) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/unload/" + id);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
 	private String getSetting(String name) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
 		URI target = URIUtils.getChild(endpoint, "/settings/" + name);
-		DefaultHTTPRequest request = new DefaultHTTPRequest(
-			"GET",
-			target.getPath(),
-			new PlainMimeEmptyPart(null,
-				new MimeHeader("Content-Length", "0"),
-				new MimeHeader("Host", endpoint.getAuthority())
-			)
-		);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+		if (!(response.getContent() instanceof ContentPart)) {
+			throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
+		}
+		return new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8");
+	}
+	
+	private HTTPResponse request(HTTPRequest request) throws IOException, FormatException, ParseException {
 		// if we can, force authentication because we know the server will require it anyway, this saves us a trip
 		// we also know the server requires basic authentication
 		if (authenticationHandler != null) {
@@ -76,14 +95,7 @@ public class RemoteServer implements ServiceRunner {
 				request.getContent().setHeader(new MimeHeader(HTTPUtils.SERVER_AUTHENTICATE_RESPONSE, authenticationResponse));
 			}
 		}
-		HTTPResponse response = client.execute(request, principal, endpoint.getScheme().equalsIgnoreCase("https"), true);
-		if (response.getCode() != 200) {
-			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
-		}
-		if (!(response.getContent() instanceof ContentPart)) {
-			throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
-		}
-		return new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8");
+		return client.execute(request, principal, endpoint.getScheme().equalsIgnoreCase("https"), true);
 	}
 
 	@Override
@@ -108,15 +120,7 @@ public class RemoteServer implements ServiceRunner {
 					new MimeHeader("Host", endpoint.getAuthority())
 				)
 			);
-			// if we can, force authentication because we know the server will require it anyway, this saves us a trip
-			// we also know the server requires basic authentication
-			if (authenticationHandler != null) {
-				String authenticationResponse = authenticationHandler.authenticate(principal, "basic");
-				if (authenticationResponse != null) {
-					request.getContent().setHeader(new MimeHeader(HTTPUtils.SERVER_AUTHENTICATE_RESPONSE, authenticationResponse));
-				}
-			}
-			HTTPResponse response = client.execute(request, principal, endpoint.getScheme().equalsIgnoreCase("https"), true);
+			HTTPResponse response = request(request);
 			
 			if (response.getCode() != 200) {
 				throw new ServiceException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
