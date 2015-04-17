@@ -15,9 +15,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.EAIResourceRepository;
+import be.nabu.eai.repository.RepositoryCacheDecider;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.managers.MavenManager;
+import be.nabu.eai.repository.util.NodeUtils;
+import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
@@ -31,14 +34,18 @@ import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
+import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
 import be.nabu.libs.services.api.Service;
+import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.services.cache.SimpleCacheProvider;
 import be.nabu.libs.services.maven.MavenArtifact;
 import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.api.ComplexType;
 import be.nabu.utils.http.api.HTTPRequest;
 import be.nabu.utils.http.api.server.HTTPServer;
 import be.nabu.utils.http.rest.RESTHandler;
@@ -47,6 +54,8 @@ import be.nabu.utils.http.rest.RoleHandler;
 public class Server implements ServiceRunner {
 	
 	public static final String SERVICE_THREAD_POOL = "be.nabu.eai.server.serviceThreadPoolSize";
+	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
+	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
 	private EAIResourceRepository repository;
 	private Logger logger = LoggerFactory.getLogger(getClass());
@@ -121,6 +130,33 @@ public class Server implements ServiceRunner {
 						}
 						catch (ParseException e) {
 							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+						}
+					}
+				}
+				// if it's a load or a reload and its a service with an eager setting, execute it
+				// the service must not have any inputs!
+				if (nodeEvent.getState() == NodeEvent.State.LOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
+					// only applicable to services
+					if (DefinedService.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
+						// if it's eager, execute it
+						if (NodeUtils.isEager(nodeEvent.getNode())) {
+							try {
+								ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode()).getServiceInterface().getInputDefinition();
+								ServiceRuntime runtime = new ServiceRuntime(
+									((DefinedService) nodeEvent.getNode().getArtifact()),
+									repository.newExecutionContext(SystemPrincipal.ROOT)
+								);
+								runtime.run(inputDefinition.newInstance());
+							}
+							catch (IOException e) {
+								logger.error("Could not load eager service: " + nodeEvent.getId(), e);
+							}
+							catch (ParseException e) {
+								logger.error("Could not load eager service: " + nodeEvent.getId(), e);
+							}
+							catch (ServiceException e) {
+								logger.error("Could not run eager service: " + nodeEvent.getId(), e);
+							}
 						}
 					}
 				}
@@ -212,7 +248,17 @@ public class Server implements ServiceRunner {
 		List<ServiceRunnableObserver> allObservers = new ArrayList<ServiceRunnableObserver>(observers.length + 1);
 		allObservers.add(new RunningServiceObserver());
 		allObservers.addAll(Arrays.asList(observers));
-		final ServiceRunnable runnable = new ServiceRunnable(new ServiceRuntime(service, executionContext), input, allObservers.toArray(new ServiceRunnableObserver[allObservers.size()]));
+		ServiceRuntime serviceRuntime = new ServiceRuntime(service, executionContext);
+		serviceRuntime.setCacheDecider(new RepositoryCacheDecider(repository));
+		serviceRuntime.setCache(new SimpleCacheProvider(
+			repository.newExecutionContext(SystemPrincipal.ROOT), 
+			// defaults to 100 meg for total entries
+			Long.parseLong(System.getProperty(SERVICE_MAX_CACHE_SIZE, "104857600")),
+			// defaults to 10 meg for one entry
+			Long.parseLong(System.getProperty(SERVICE_MAX_CACHE_ENTRY_SIZE, "10485760")),
+			repository.getCharset()
+		));
+		final ServiceRunnable runnable = new ServiceRunnable(serviceRuntime, input, allObservers.toArray(new ServiceRunnableObserver[allObservers.size()]));
 		// in the future could actually run this async in a thread pool but for now it is assumed that all originating systems have their own thread pool
 		// for example the messaging system runs in its own thread pool, as does the http server etc
 		// if we were going for a centralized thread pool those systems should use the central one as well but then might start to interfere with one another
