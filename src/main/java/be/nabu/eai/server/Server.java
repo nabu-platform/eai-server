@@ -5,6 +5,8 @@ import java.net.URI;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -18,6 +20,8 @@ import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.RepositoryCacheDecider;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.events.NodeEvent;
+import be.nabu.eai.repository.events.RepositoryEvent;
+import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
 import be.nabu.eai.repository.managers.MavenManager;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
@@ -63,6 +67,14 @@ public class Server implements ServiceRunner {
 
 	private RoleHandler roleHandler;
 	
+	/**
+	 * This is set to true while the repository is loading
+	 * This allows us to queue actions (in the delayedArtifacts) to be done after the repository is done loading
+	 * For example if we have an artifact that has to start(), it might depend on another artifact, so we have to finish loading first
+	 */
+	private boolean isRepositoryLoading = false;
+	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
+	
 	public Server(RoleHandler roleHandler, ResourceContainer<?> repositoryRoot, ResourceContainer<?> mavenRoot) throws IOException {
 		this.roleHandler = roleHandler;
 		this.repository = new EAIResourceRepository(repositoryRoot, mavenRoot);
@@ -83,16 +95,13 @@ public class Server implements ServiceRunner {
 				if (nodeEvent.isDone()) {
 					// a new node is loaded, let's check if we have to set something up
 					if (nodeEvent.getState() == NodeEvent.State.LOAD) {
-						try {
-							if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								start((StartableArtifact) nodeEvent.getNode().getArtifact());
+						if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
+							if (isRepositoryLoading) {
+								delayedNodeEvents.add(nodeEvent);
 							}
-						}
-						catch (IOException e) {
-							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
-						}
-						catch (ParseException e) {
-							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+							else {
+								start(nodeEvent);
+							}
 						}
 					}
 					else if (nodeEvent.getState() == NodeEvent.State.RELOAD) {
@@ -116,6 +125,23 @@ public class Server implements ServiceRunner {
 							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
 						}
 					}
+					
+					// if it's a load or a reload and its a service with an eager setting, execute it
+					// the service must not have any inputs!
+					if (nodeEvent.getState() == NodeEvent.State.LOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
+						// only applicable to services
+						if (DefinedService.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
+							// if it's eager, execute it
+							if (NodeUtils.isEager(nodeEvent.getNode())) {
+								if (isRepositoryLoading) {
+									delayedNodeEvents.add(nodeEvent);
+								}
+								else {
+									run(nodeEvent);
+								}
+							}
+						}
+					}
 				}
 				else {
 					// if a node is unloaded we might need to stop something
@@ -133,36 +159,69 @@ public class Server implements ServiceRunner {
 						}
 					}
 				}
-				// if it's a load or a reload and its a service with an eager setting, execute it
-				// the service must not have any inputs!
-				if (nodeEvent.getState() == NodeEvent.State.LOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
-					// only applicable to services
-					if (DefinedService.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-						// if it's eager, execute it
-						if (NodeUtils.isEager(nodeEvent.getNode())) {
-							try {
-								ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode()).getServiceInterface().getInputDefinition();
-								ServiceRuntime runtime = new ServiceRuntime(
-									((DefinedService) nodeEvent.getNode().getArtifact()),
-									repository.newExecutionContext(SystemPrincipal.ROOT)
-								);
-								runtime.run(inputDefinition.newInstance());
+				return null;
+			}
+		});
+		
+		repository.getEventDispatcher().subscribe(RepositoryEvent.class, new EventHandler<RepositoryEvent, Void>() {
+			@Override
+			public Void handle(RepositoryEvent event) {
+				if (event.getState() == RepositoryState.LOAD) {
+					// if the loading is done, toggle the boolean and finish delayed actions
+					if (event.isDone()) {
+						logger.info("Repository loaded, processing nodes");
+						isRepositoryLoading = false;
+						orderNodes(repository, delayedNodeEvents);
+						// TODO: load in dependency order!
+						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
+							if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+								start(delayedNodeEvent);
 							}
-							catch (IOException e) {
-								logger.error("Could not load eager service: " + nodeEvent.getId(), e);
-							}
-							catch (ParseException e) {
-								logger.error("Could not load eager service: " + nodeEvent.getId(), e);
-							}
-							catch (ServiceException e) {
-								logger.error("Could not run eager service: " + nodeEvent.getId(), e);
+							if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
+								run(delayedNodeEvent);
 							}
 						}
+					}
+					else {
+						isRepositoryLoading = true;
+						delayedNodeEvents.clear();
 					}
 				}
 				return null;
 			}
 		});
+	}
+
+	private void run(NodeEvent nodeEvent) {
+		try {
+			ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode()).getServiceInterface().getInputDefinition();
+			ServiceRuntime runtime = new ServiceRuntime(
+				((DefinedService) nodeEvent.getNode().getArtifact()),
+				repository.newExecutionContext(SystemPrincipal.ROOT)
+			);
+			runtime.run(inputDefinition.newInstance());
+		}
+		catch (IOException e) {
+			logger.error("Could not load eager service: " + nodeEvent.getId(), e);
+		}
+		catch (ParseException e) {
+			logger.error("Could not load eager service: " + nodeEvent.getId(), e);
+		}
+		catch (ServiceException e) {
+			logger.error("Could not run eager service: " + nodeEvent.getId(), e);
+		}
+	}
+	
+	private void start(NodeEvent nodeEvent) {
+		try {
+			start((StartableArtifact) nodeEvent.getNode().getArtifact());
+		}
+		catch (IOException e) {
+			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+		}
+		catch (ParseException e) {
+			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+		}
 	}
 	
 	public void enableMaven(HTTPServer server) {
@@ -329,5 +388,18 @@ public class Server implements ServiceRunner {
 	
 	public void setUpdateMavenSnapshots(boolean update) {
 		repository.setUpdateMavenSnapshots(update);
+	}
+	
+	/**
+	 * TODO: Only checks direct references atm, not recursive ones
+	 */
+	private static void orderNodes(final EAIResourceRepository repository, List<NodeEvent> events) {
+		Collections.sort(events, new Comparator<NodeEvent>() {
+			@Override
+			public int compare(NodeEvent o1, NodeEvent o2) {
+				List<String> references = repository.getReferences(o1.getId());
+				return references == null || !references.contains(o2.getId()) ? -1 : 1;
+			}
+		});
 	}
 }
