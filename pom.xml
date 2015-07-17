@@ -32,7 +32,7 @@
 		<dependency>
 			<groupId>be.nabu.utils</groupId>
 			<artifactId>utils-io</artifactId>
-			<version>1.0-SNAPSHOT</version>
+			<version>1.2-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>be.nabu.utils</groupId>
@@ -60,13 +60,13 @@
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-http</artifactId>
+			<groupId>be.nabu.libs.http</groupId>
+			<artifactId>http-api</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-http-rest</artifactId>
+			<groupId>be.nabu.libs.http</groupId>
+			<artifactId>http-server-rest</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
@@ -262,6 +262,32 @@
 		<dependency>
 			<groupId>be.nabu.eai</groupId>
 			<artifactId>eai-repository</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+
+		<dependency>
+			<groupId>be.nabu.glue</groupId>
+			<artifactId>glue-api</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.glue</groupId>
+			<artifactId>glue</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.glue</groupId>
+			<artifactId>glue-types</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.glue</groupId>
+			<artifactId>glue-services</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.http</groupId>
+			<artifactId>http-glue</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 

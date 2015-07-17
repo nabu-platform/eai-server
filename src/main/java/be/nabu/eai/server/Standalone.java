@@ -10,12 +10,12 @@ import java.util.Properties;
 import java.io.BufferedInputStream;
 
 import be.nabu.libs.events.impl.EventDispatcherImpl;
+import be.nabu.libs.http.api.server.HTTPServer;
+import be.nabu.libs.http.api.server.RoleHandler;
+import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.api.ResourceContainer;
-import be.nabu.utils.http.api.server.HTTPServer;
-import be.nabu.utils.http.rest.RoleHandler;
-import be.nabu.utils.http.server.DefaultHTTPServer;
 
 public class Standalone {
 	
@@ -67,7 +67,7 @@ public class Standalone {
 		server.start();
 		
 		if (enableREST || enableMaven) {
-			HTTPServer http = new DefaultHTTPServer(port, listenerPoolSize, new EventDispatcherImpl());
+			HTTPServer http = HTTPServerUtils.newNonBlocking(port, listenerPoolSize, new EventDispatcherImpl());
 			if (enableREST) {
 				server.enableREST(http);
 			}

@@ -30,6 +30,10 @@ import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.events.api.EventHandler;
+import be.nabu.libs.http.api.HTTPRequest;
+import be.nabu.libs.http.api.server.HTTPServer;
+import be.nabu.libs.http.api.server.RoleHandler;
+import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
 import be.nabu.libs.maven.MavenListener;
@@ -50,10 +54,6 @@ import be.nabu.libs.services.maven.MavenArtifact;
 import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
-import be.nabu.utils.http.api.HTTPRequest;
-import be.nabu.utils.http.api.server.HTTPServer;
-import be.nabu.utils.http.rest.RESTHandler;
-import be.nabu.utils.http.rest.RoleHandler;
 
 public class Server implements ServiceRunner {
 	
