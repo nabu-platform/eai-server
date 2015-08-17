@@ -28,15 +28,17 @@
 	</build>
 
 	<dependencies>
-		<!-- Same as repository -->
+		<!-- Environment-dependent -->
 		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-io</artifactId>
-			<version>1.2-SNAPSHOT</version>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<version>9.3-1102-jdbc41</version>
 		</dependency>
+
+		<!-- General dependencies -->
 		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-codec</artifactId>
+			<groupId>be.nabu.eai</groupId>
+			<artifactId>eai-api</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
@@ -50,25 +52,29 @@
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-mime</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.utils</groupId>
-			<artifactId>utils-xml</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
 			<groupId>be.nabu.libs.http</groupId>
-			<artifactId>http-api</artifactId>
+			<artifactId>http-server</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>be.nabu.libs.http</groupId>
-			<artifactId>http-server-rest</artifactId>
+			<groupId>be.nabu.libs.resources</groupId>
+			<artifactId>resources-file</artifactId>
+			<version>1.1-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.events</groupId>
+			<artifactId>events-impl</artifactId>
+			<version>1.1-SNAPSHOT</version>
+		</dependency>
+
+		<!-- General artifacts -->
+		<dependency>
+			<groupId>be.nabu.libs.artifacts</groupId>
+			<artifactId>artifacts-jdbc</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
+
+		<!-- Maven dependencies -->
 		<dependency>
 			<groupId>be.nabu.libs.maven</groupId>
 			<artifactId>maven-repository</artifactId>
@@ -85,48 +91,7 @@
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
-		<dependency>
-			<groupId>be.nabu.libs.converter</groupId>
-			<artifactId>converter-api</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.converter</groupId>
-			<artifactId>converter-base</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-binding-api</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-binding-xml</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-binding-flat</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-binding-json</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-api</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-base</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
+		<!-- The different type implementations -->
 		<dependency>
 			<groupId>be.nabu.libs.types</groupId>
 			<artifactId>types-java</artifactId>
@@ -137,29 +102,37 @@
 			<artifactId>types-uml</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
-
 		<dependency>
 			<groupId>be.nabu.libs.types</groupId>
 			<artifactId>types-xml</artifactId>
+			<version>1.1-SNAPSHOT</version>
+		</dependency>
+
+		<!-- Type data bindings -->
+		<dependency>
+			<groupId>be.nabu.libs.types</groupId>
+			<artifactId>types-binding-xml</artifactId>
+			<version>1.1-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.types</groupId>
+			<artifactId>types-binding-flat</artifactId>
+			<version>1.2-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.types</groupId>
+			<artifactId>types-binding-json</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
-		<dependency>
-			<groupId>be.nabu.libs.types</groupId>
-			<artifactId>types-definition-api</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
+		<!-- Type definition bindings -->
 		<dependency>
 			<groupId>be.nabu.libs.types</groupId>
 			<artifactId>types-definition-xsd</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
-		<dependency>
-			<groupId>be.nabu.libs.services</groupId>
-			<artifactId>services-api</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
+		<!-- Service implementations -->
 		<dependency>
 			<groupId>be.nabu.libs.services</groupId>
 			<artifactId>services-pojo</artifactId>
@@ -181,95 +154,36 @@
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
-		<dependency>
-			<groupId>be.nabu.libs.resources</groupId>
-			<artifactId>resources-api</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.resources</groupId>
-			<artifactId>resources-file</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-
-		<dependency>
-			<groupId>be.nabu.libs.events</groupId>
-			<artifactId>events-api</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.events</groupId>
-			<artifactId>events-impl</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
-
-		<dependency>
-			<groupId>org.postgresql</groupId>
-			<artifactId>postgresql</artifactId>
-			<version>9.3-1102-jdbc41</version>
-		</dependency>
-
-		<dependency>
-			<groupId>be.nabu.libs.artifacts</groupId>
-			<artifactId>artifacts-jdbc</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-
-		<dependency>
-			<groupId>be.nabu.libs.tasks</groupId>
-			<artifactId>tasks-api</artifactId>
-			<version>1.1-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.tasks</groupId>
-			<artifactId>tasks-queues-database</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.tasks</groupId>
-			<artifactId>tasks-queues-cache</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-			<groupId>be.nabu.libs.tasks</groupId>
-			<artifactId>tasks-remote</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
+		<!-- Broker -->
 		<dependency>
 			<groupId>be.nabu.eai</groupId>
 			<artifactId>eai-broker</artifactId>
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
+		<!-- Frameworks -->
 		<dependency>
-			<groupId>org.slf4j</groupId>
-			<artifactId>slf4j-api</artifactId>
-			<version>1.6.4</version>
+			<groupId>be.nabu.libs.datastore</groupId>
+			<artifactId>datastore-urn-database</artifactId>
+			<version>1.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>
-			<groupId>ch.qos.logback</groupId>
-			<artifactId>logback-classic</artifactId>
-			<version>1.0.2</version>
+			<groupId>be.nabu.libs.datatransactions</groupId>
+			<artifactId>datatransactions-database</artifactId>
+			<version>1.1-SNAPSHOT</version>
 		</dependency>
-
 		<dependency>
-			<groupId>javax.ws.rs</groupId>
-			<artifactId>javax.ws.rs-api</artifactId>
-			<version>2.0.1</version>
+			<groupId>be.nabu.libs.datastore</groupId>
+			<artifactId>datastore-resources</artifactId>
+			<version>1.1-SNAPSHOT</version>
 		</dependency>
-
-		<!-- Repository itself -->
 		<dependency>
-			<groupId>be.nabu.eai</groupId>
-			<artifactId>eai-repository</artifactId>
-			<version>1.0-SNAPSHOT</version>
+			<groupId>be.nabu.libs.channels</groupId>
+			<artifactId>channels-resources</artifactId>
+			<version>1.1-SNAPSHOT</version>
 		</dependency>
 
-		<dependency>
-			<groupId>be.nabu.glue</groupId>
-			<artifactId>glue-api</artifactId>
-			<version>1.0-SNAPSHOT</version>
-		</dependency>
+		<!-- Glue dependencies -->
 		<dependency>
 			<groupId>be.nabu.glue</groupId>
 			<artifactId>glue</artifactId>
@@ -291,6 +205,37 @@
 			<version>1.0-SNAPSHOT</version>
 		</dependency>
 
+		<!-- Logging -->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-api</artifactId>
+			<version>1.6.4</version>
+		</dependency>
+		<dependency>
+			<groupId>ch.qos.logback</groupId>
+			<artifactId>logback-classic</artifactId>
+			<version>1.0.2</version>
+		</dependency>
+
+		<dependency>
+			<groupId>javax.ws.rs</groupId>
+			<artifactId>javax.ws.rs-api</artifactId>
+			<version>2.0.1</version>
+		</dependency>
+
+
+		<!-- _____________________________________________ SPECIFIC ______________________________________________-->
+		<!-- Repository itself -->
+		<dependency>
+			<groupId>be.nabu.libs.http</groupId>
+			<artifactId>http-server-rest</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.eai</groupId>
+			<artifactId>eai-repository</artifactId>
+			<version>1.0-SNAPSHOT</version>
+		</dependency>
 		<dependency>
 			<groupId>be.nabu.libs.services</groupId>
 			<artifactId>services-cache</artifactId>
