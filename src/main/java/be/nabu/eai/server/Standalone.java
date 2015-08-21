@@ -9,9 +9,9 @@ import java.net.URISyntaxException;
 import java.util.Properties;
 import java.io.BufferedInputStream;
 
+import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.server.HTTPServer;
-import be.nabu.libs.http.api.server.RoleHandler;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
