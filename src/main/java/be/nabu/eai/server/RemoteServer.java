@@ -10,6 +10,12 @@ import java.security.Principal;
 import java.text.ParseException;
 import java.util.concurrent.Future;
 
+import be.nabu.libs.http.api.HTTPRequest;
+import be.nabu.libs.http.api.HTTPResponse;
+import be.nabu.libs.http.api.client.ClientAuthenticationHandler;
+import be.nabu.libs.http.api.client.HTTPClient;
+import be.nabu.libs.http.core.DefaultHTTPRequest;
+import be.nabu.libs.http.core.HTTPUtils;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
@@ -22,12 +28,6 @@ import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
-import be.nabu.utils.http.DefaultHTTPRequest;
-import be.nabu.utils.http.HTTPUtils;
-import be.nabu.utils.http.api.AuthenticationHandler;
-import be.nabu.utils.http.api.HTTPRequest;
-import be.nabu.utils.http.api.HTTPResponse;
-import be.nabu.utils.http.api.client.HTTPClient;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.ContentPart;
 import be.nabu.utils.mime.impl.FormatException;
@@ -41,7 +41,7 @@ public class RemoteServer implements ServiceRunner {
 	private HTTPClient client;
 	private URI endpoint;
 	private Principal principal;
-	private AuthenticationHandler authenticationHandler;
+	private ClientAuthenticationHandler authenticationHandler;
 
 	public RemoteServer(HTTPClient client, URI endpoint, Principal principal, Charset charset) {
 		this.client = client;
