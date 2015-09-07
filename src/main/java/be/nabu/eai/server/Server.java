@@ -26,6 +26,7 @@ import be.nabu.eai.repository.managers.MavenManager;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.rest.ServerREST;
+import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
@@ -49,6 +50,7 @@ import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.services.cache.SimpleCacheProvider;
 import be.nabu.libs.services.maven.MavenArtifact;
 import be.nabu.libs.types.DefinedTypeResolverFactory;
@@ -109,13 +111,9 @@ public class Server implements ServiceRunner {
 							if (RestartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
 								restart((RestartableArtifact) nodeEvent.getNode().getArtifact());
 							}
-							else {
-								if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-									stop((StoppableArtifact) nodeEvent.getNode().getArtifact());
-								}
-								if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-									start((StartableArtifact) nodeEvent.getNode().getArtifact());
-								}
+							else if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass()) && StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
+								stop((StoppableArtifact) nodeEvent.getNode().getArtifact());
+								start((StartableArtifact) nodeEvent.getNode().getArtifact());
 							}
 						}
 						catch (IOException e) {
@@ -278,6 +276,31 @@ public class Server implements ServiceRunner {
 		}
 	}
 	
+	public void restart(String id) {
+		Artifact resolved = getRepository().resolve(id);
+		if (resolved instanceof RestartableArtifact) {
+			restart((RestartableArtifact) resolved);
+		}
+		else if (resolved instanceof StartableArtifact && resolved instanceof StoppableArtifact) {
+			stop((StoppableArtifact) resolved);
+			start((StartableArtifact) resolved);
+		}
+	}
+	
+	public void stop(String id) {
+		Artifact resolved = getRepository().resolve(id);
+		if (resolved instanceof StoppableArtifact) {
+			stop((StoppableArtifact) resolved);
+		}
+	}
+	
+	public void start(String id) {
+		Artifact resolved = getRepository().resolve(id);
+		if (resolved instanceof StartableArtifact) {
+			start((StartableArtifact) resolved);
+		}
+	}
+	
 	private void restart(RestartableArtifact artifact) {
 		logger.info("Restarting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
@@ -303,11 +326,12 @@ public class Server implements ServiceRunner {
 	}
 
 	@Override
-	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRunnableObserver...observers) {
+	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRuntimeTracker tracker, ServiceRunnableObserver...observers) {
 		List<ServiceRunnableObserver> allObservers = new ArrayList<ServiceRunnableObserver>(observers.length + 1);
 		allObservers.add(new RunningServiceObserver());
 		allObservers.addAll(Arrays.asList(observers));
 		ServiceRuntime serviceRuntime = new ServiceRuntime(service, executionContext);
+		serviceRuntime.setRuntimeTracker(tracker);
 		serviceRuntime.setCacheDecider(new RepositoryCacheDecider(repository));
 		serviceRuntime.setCache(new SimpleCacheProvider(
 			repository.newExecutionContext(SystemPrincipal.ROOT), 

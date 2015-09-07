@@ -25,6 +25,7 @@ import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
@@ -99,7 +100,7 @@ public class RemoteServer implements ServiceRunner {
 	}
 
 	@Override
-	public Future<ServiceResult> run(Service service, ExecutionContext arg1, ComplexContent input, ServiceRunnableObserver... arg3) {
+	public Future<ServiceResult> run(Service service, ExecutionContext arg1, ComplexContent input, ServiceRuntimeTracker serviceRuntimeTracker, ServiceRunnableObserver... arg3) {
 		if (!(service instanceof DefinedService)) {
 			throw new IllegalArgumentException("The service has to be a defined one for remote execution");
 		}

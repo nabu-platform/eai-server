@@ -86,7 +86,7 @@ public class ServerREST {
 		ComplexContent input = binding.unmarshal(content, new Window[0]);
 		
 		// need to return the output & the id of the thread it is running in
-		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(securityContext == null ? null : securityContext.getUserPrincipal()), input);
+		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(securityContext == null ? null : securityContext.getUserPrincipal()), input, null);
 		try {
 			ServiceResult serviceResult = future.get();
 			if (serviceResult.getException() != null) {
