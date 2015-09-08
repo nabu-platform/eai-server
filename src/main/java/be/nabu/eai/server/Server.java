@@ -111,8 +111,7 @@ public class Server implements ServiceRunner {
 							if (RestartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
 								restart((RestartableArtifact) nodeEvent.getNode().getArtifact());
 							}
-							else if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass()) && StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								stop((StoppableArtifact) nodeEvent.getNode().getArtifact());
+							else if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
 								start((StartableArtifact) nodeEvent.getNode().getArtifact());
 							}
 						}
@@ -143,7 +142,7 @@ public class Server implements ServiceRunner {
 				}
 				else {
 					// if a node is unloaded we might need to stop something
-					if (nodeEvent.getState() == NodeEvent.State.UNLOAD) {
+					if (nodeEvent.getState() == NodeEvent.State.UNLOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
 							if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
 								stop((StoppableArtifact) nodeEvent.getNode().getArtifact());
