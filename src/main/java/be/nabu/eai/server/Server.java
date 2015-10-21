@@ -421,7 +421,7 @@ public class Server implements ServiceRunner {
 			@Override
 			public int compare(NodeEvent o1, NodeEvent o2) {
 				List<String> references = repository.getReferences(o1.getId());
-				return references == null || !references.contains(o2.getId()) ? -1 : 1;
+				return references == null || !references.contains(o2.getId()) ? 0 : 1;
 			}
 		});
 	}
