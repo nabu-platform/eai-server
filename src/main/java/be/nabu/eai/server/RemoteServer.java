@@ -124,7 +124,7 @@ public class RemoteServer implements ServiceRunner {
 			HTTPResponse response = request(request);
 			
 			if (response.getCode() != 200) {
-				throw new ServiceException("Remote server code " + response.getCode() + ": " + response.getMessage());
+				throw new ServiceException("REMOTE-1", "Remote server code " + response.getCode() + ": " + response.getMessage(), response.getCode(), response.getMessage());
 			}
 			if (!(response.getContent() instanceof ContentPart)) {
 				throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
