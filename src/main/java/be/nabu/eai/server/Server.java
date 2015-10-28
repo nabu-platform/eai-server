@@ -22,7 +22,6 @@ import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
-import be.nabu.eai.repository.managers.MavenManager;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.rest.ServerREST;
@@ -52,8 +51,6 @@ import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.services.cache.SimpleCacheProvider;
-import be.nabu.libs.services.maven.MavenArtifact;
-import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 
@@ -226,9 +223,8 @@ public class Server implements ServiceRunner {
 			@Override
 			public Void handle(DeleteResourceRepositoryEvent event) {
 				logger.info("Deleting maven artifact " + event.getArtifact().getArtifactId());
-				MavenManager manager = new MavenManager(DefinedTypeResolverFactory.getInstance().getResolver());
 				try {
-					manager.removeChildren(repository.getRoot(), manager.load(repository.getMavenRepository(), event.getArtifact(), repository.getLocalMavenServer(), repository.isUpdateMavenSnapshots()));
+					repository.unloadMavenArtifact(event.getArtifact());
 				}
 				catch (IOException e) {
 					throw new RuntimeException(e);
@@ -245,14 +241,7 @@ public class Server implements ServiceRunner {
 			@Override
 			public Void handle(CreateResourceRepositoryEvent event) {
 				logger.info("Installing maven artifact " + event.getArtifact().getArtifactId());
-				MavenManager manager = new MavenManager(DefinedTypeResolverFactory.getInstance().getResolver());
-				MavenArtifact artifact = manager.load(repository.getMavenRepository(), event.getArtifact(), repository.getLocalMavenServer(), repository.isUpdateMavenSnapshots());
-				try {
-					manager.addChildren(repository.getRoot(), artifact);
-				}
-				catch (IOException e) {
-					throw new RuntimeException(e);
-				}
+				repository.loadMavenArtifact(event.getArtifact());
 				return null;
 			}
 		}).filter(new EventHandler<CreateResourceRepositoryEvent, Boolean>() {
