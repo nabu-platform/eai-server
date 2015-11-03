@@ -22,8 +22,9 @@ public class MavenServer {
 		
 		Repository repository = new ResourceRepository((ResourceContainer<?>) ResourceFactory.getInstance().resolve(new URI(URIUtils.encodeURI(filePath)), null));
 		
-		HTTPServer server = HTTPServerUtils.newNonBlocking(8080, 20, new EventDispatcherImpl());
-		server.getEventDispatcher().subscribe(HTTPRequest.class, new MavenListener(repository));
+		HTTPServer server = HTTPServerUtils.newServer(8080, 20);
+		server.route(null, new EventDispatcherImpl());
+		server.getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository));
 		server.start();
 	}
 }

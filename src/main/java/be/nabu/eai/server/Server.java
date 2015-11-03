@@ -83,7 +83,7 @@ public class Server implements ServiceRunner {
 
 	public void enableREST(HTTPServer server) {
 		// make sure we intercept invoke commands
-		server.getEventDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
+		server.getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
 	}
 	
 	public void initialize() {
@@ -251,7 +251,7 @@ public class Server implements ServiceRunner {
 			}
 		});
 		// no support for non-root calls atm!
-		server.getEventDispatcher().subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
+		server.getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
 	private void start(StartableArtifact artifact) {
