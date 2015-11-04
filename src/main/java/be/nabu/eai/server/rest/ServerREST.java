@@ -130,6 +130,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/maven")
 	public URI getMaven() {
-		return server.getMavenRoot();
+		return server.getRepository().getMavenRoot();
 	}
 }

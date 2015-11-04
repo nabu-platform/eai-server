@@ -16,8 +16,7 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import be.nabu.eai.repository.EAIResourceRepository;
-import be.nabu.eai.repository.RepositoryCacheDecider;
+import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.RepositoryEvent;
@@ -30,6 +29,7 @@ import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.authentication.api.RoleHandler;
+import be.nabu.libs.cache.api.CacheProvider;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.server.HTTPServer;
@@ -38,7 +38,6 @@ import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
 import be.nabu.libs.maven.MavenListener;
 import be.nabu.libs.resources.ResourceUtils;
-import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
@@ -50,7 +49,6 @@ import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.services.api.ServiceRuntimeTracker;
-import be.nabu.libs.services.cache.SimpleCacheProvider;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 
@@ -60,11 +58,12 @@ public class Server implements ServiceRunner {
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
 	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
-	private EAIResourceRepository repository;
+	private MavenRepository repository;
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 
 	private RoleHandler roleHandler;
+	private CacheProvider cacheProvider;
 	
 	/**
 	 * This is set to true while the repository is loading
@@ -74,10 +73,9 @@ public class Server implements ServiceRunner {
 	private boolean isRepositoryLoading = false;
 	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
 	
-	public Server(RoleHandler roleHandler, ResourceContainer<?> repositoryRoot, ResourceContainer<?> mavenRoot) throws IOException {
+	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
-		this.repository = new EAIResourceRepository(repositoryRoot, mavenRoot);
-		this.repository.setServiceRunner(this);
+		this.repository = repository;
 		initialize();
 	}
 
@@ -188,11 +186,12 @@ public class Server implements ServiceRunner {
 
 	private void run(NodeEvent nodeEvent) {
 		try {
-			ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode()).getServiceInterface().getInputDefinition();
+			ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode().getArtifact()).getServiceInterface().getInputDefinition();
 			ServiceRuntime runtime = new ServiceRuntime(
 				((DefinedService) nodeEvent.getNode().getArtifact()),
 				repository.newExecutionContext(SystemPrincipal.ROOT)
 			);
+			runtime.setAllowCaching(false);
 			runtime.run(inputDefinition.newInstance());
 		}
 		catch (IOException e) {
@@ -223,12 +222,7 @@ public class Server implements ServiceRunner {
 			@Override
 			public Void handle(DeleteResourceRepositoryEvent event) {
 				logger.info("Deleting maven artifact " + event.getArtifact().getArtifactId());
-				try {
-					repository.unloadMavenArtifact(event.getArtifact());
-				}
-				catch (IOException e) {
-					throw new RuntimeException(e);
-				}
+				repository.unloadMavenArtifact(event.getArtifact());
 				return null;
 			}
 		}).filter(new EventHandler<DeleteResourceRepositoryEvent, Boolean>() {
@@ -309,7 +303,7 @@ public class Server implements ServiceRunner {
 		}
 	}
 
-	public Repository getRepository() {
+	public MavenRepository getRepository() {
 		return repository;
 	}
 
@@ -320,15 +314,7 @@ public class Server implements ServiceRunner {
 		allObservers.addAll(Arrays.asList(observers));
 		ServiceRuntime serviceRuntime = new ServiceRuntime(service, executionContext);
 		serviceRuntime.setRuntimeTracker(tracker);
-		serviceRuntime.setCacheDecider(new RepositoryCacheDecider(repository));
-		serviceRuntime.setCache(new SimpleCacheProvider(
-			repository.newExecutionContext(SystemPrincipal.ROOT), 
-			// defaults to 100 meg for total entries
-			Long.parseLong(System.getProperty(SERVICE_MAX_CACHE_SIZE, "104857600")),
-			// defaults to 10 meg for one entry
-			Long.parseLong(System.getProperty(SERVICE_MAX_CACHE_ENTRY_SIZE, "10485760")),
-			repository.getCharset()
-		));
+		serviceRuntime.setCache(cacheProvider);
 		final ServiceRunnable runnable = new ServiceRunnable(serviceRuntime, input, allObservers.toArray(new ServiceRunnableObserver[allObservers.size()]));
 		// in the future could actually run this async in a thread pool but for now it is assumed that all originating systems have their own thread pool
 		// for example the messaging system runs in its own thread pool, as does the http server etc
@@ -390,22 +376,10 @@ public class Server implements ServiceRunner {
 		return ResourceUtils.getURI(repository.getRoot().getContainer());
 	}
 	
-	public URI getMavenRoot() {
-		return ResourceUtils.getURI(repository.getMavenRoot());
-	}
-	
-	public void setLocalMavenServer(URI uri) {
-		repository.setLocalMavenServer(uri);
-	}
-	
-	public void setUpdateMavenSnapshots(boolean update) {
-		repository.setUpdateMavenSnapshots(update);
-	}
-	
 	/**
 	 * TODO: Only checks direct references atm, not recursive ones
 	 */
-	private static void orderNodes(final EAIResourceRepository repository, List<NodeEvent> events) {
+	private static void orderNodes(final Repository repository, List<NodeEvent> events) {
 		Collections.sort(events, new Comparator<NodeEvent>() {
 			@Override
 			public int compare(NodeEvent o1, NodeEvent o2) {
@@ -413,5 +387,15 @@ public class Server implements ServiceRunner {
 				return references == null || !references.contains(o2.getId()) ? 0 : 1;
 			}
 		});
+	}
+
+	@Override
+	public CacheProvider getCacheProvider() {
+		return cacheProvider;
+	}
+
+	@Override
+	public void setCacheProvider(CacheProvider cacheProvider) {
+		this.cacheProvider = cacheProvider;
 	}
 }

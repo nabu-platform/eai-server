@@ -9,6 +9,7 @@ import java.net.URISyntaxException;
 import java.util.Properties;
 import java.io.BufferedInputStream;
 
+import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.server.HTTPServer;
@@ -59,10 +60,16 @@ public class Standalone {
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		
-		Server server = new Server(roleHandler, repositoryRoot, mavenRoot);
+		// create the repository
+		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
+		// create the server
+		Server server = new Server(roleHandler, repositoryInstance);
+		// set the server as the runner for the repository
+		repositoryInstance.setServiceRunner(server);
+		
 		if (localMavenServer != null) {
-			server.setLocalMavenServer(new URI(URIUtils.encodeURI(localMavenServer)));
-			server.setUpdateMavenSnapshots(updateMavenSnapshots);
+			repositoryInstance.setLocalMavenServer(new URI(URIUtils.encodeURI(localMavenServer)));
+			repositoryInstance.setUpdateMavenSnapshots(updateMavenSnapshots);
 		}
 		server.start();
 		

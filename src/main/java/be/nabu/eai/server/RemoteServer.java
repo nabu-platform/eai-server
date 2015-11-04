@@ -10,6 +10,7 @@ import java.security.Principal;
 import java.text.ParseException;
 import java.util.concurrent.Future;
 
+import be.nabu.libs.cache.api.CacheProvider;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.ClientAuthenticationHandler;
@@ -148,6 +149,16 @@ public class RemoteServer implements ServiceRunner {
 			exception = e;
 		}
 		return new Server.ServiceResultFuture(new SimpleServiceResult(result, exception));
+	}
+
+	@Override
+	public CacheProvider getCacheProvider() {
+		return null;
+	}
+
+	@Override
+	public void setCacheProvider(CacheProvider cacheProvider) {
+		// do nothing
 	}
 	
 }
