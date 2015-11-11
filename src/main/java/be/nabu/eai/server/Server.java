@@ -97,17 +97,17 @@ public class Server implements ServiceRunner {
 								delayedNodeEvents.add(nodeEvent);
 							}
 							else {
-								start(nodeEvent);
+								start(nodeEvent, true);
 							}
 						}
 					}
 					else if (nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
 							if (RestartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								restart((RestartableArtifact) nodeEvent.getNode().getArtifact());
+								restart((RestartableArtifact) nodeEvent.getNode().getArtifact(), true);
 							}
 							else if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								start((StartableArtifact) nodeEvent.getNode().getArtifact());
+								start((StartableArtifact) nodeEvent.getNode().getArtifact(), true);
 							}
 						}
 						catch (IOException e) {
@@ -140,7 +140,7 @@ public class Server implements ServiceRunner {
 					if (nodeEvent.getState() == NodeEvent.State.UNLOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
 							if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								stop((StoppableArtifact) nodeEvent.getNode().getArtifact());
+								stop((StoppableArtifact) nodeEvent.getNode().getArtifact(), true);
 							}
 						}
 						catch (IOException e) {
@@ -167,7 +167,8 @@ public class Server implements ServiceRunner {
 						// TODO: load in dependency order!
 						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
 							if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
-								start(delayedNodeEvent);
+								// don't recurse, on start we should be starting all the nodes
+								start(delayedNodeEvent, false);
 							}
 							if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
 								run(delayedNodeEvent);
@@ -205,9 +206,9 @@ public class Server implements ServiceRunner {
 		}
 	}
 	
-	private void start(NodeEvent nodeEvent) {
+	private void start(NodeEvent nodeEvent, boolean recursive) {
 		try {
-			start((StartableArtifact) nodeEvent.getNode().getArtifact());
+			start((StartableArtifact) nodeEvent.getNode().getArtifact(), recursive);
 		}
 		catch (IOException e) {
 			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
@@ -248,10 +249,22 @@ public class Server implements ServiceRunner {
 		server.getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
-	private void start(StartableArtifact artifact) {
+	private void start(StartableArtifact artifact, boolean recursive) {
 		logger.info("Starting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
 			artifact.start();
+			if (recursive) {
+				for (String dependency : repository.getDependencies(artifact.getId())) {
+					try {
+						if (repository.getNode(dependency).getArtifact() instanceof StartableArtifact) {
+							start((StartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+						}
+					}
+					catch (Exception e) {
+						logger.error("Could not start dependency: " + dependency, e);
+					}
+				}
+			}
 		}
 		catch (Exception e) {
 			logger.error("Error while starting " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
@@ -261,42 +274,66 @@ public class Server implements ServiceRunner {
 	public void restart(String id) {
 		Artifact resolved = getRepository().resolve(id);
 		if (resolved instanceof RestartableArtifact) {
-			restart((RestartableArtifact) resolved);
+			restart((RestartableArtifact) resolved, true);
 		}
 		else if (resolved instanceof StartableArtifact && resolved instanceof StoppableArtifact) {
-			stop((StoppableArtifact) resolved);
-			start((StartableArtifact) resolved);
+			stop((StoppableArtifact) resolved, true);
+			start((StartableArtifact) resolved, true);
 		}
 	}
 	
 	public void stop(String id) {
 		Artifact resolved = getRepository().resolve(id);
 		if (resolved instanceof StoppableArtifact) {
-			stop((StoppableArtifact) resolved);
+			stop((StoppableArtifact) resolved, true);
 		}
 	}
 	
 	public void start(String id) {
 		Artifact resolved = getRepository().resolve(id);
 		if (resolved instanceof StartableArtifact) {
-			start((StartableArtifact) resolved);
+			start((StartableArtifact) resolved, true);
 		}
 	}
 	
-	private void restart(RestartableArtifact artifact) {
+	private void restart(RestartableArtifact artifact, boolean recursive) {
 		logger.info("Restarting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
 			artifact.restart();
+			if (recursive) {
+				for (String dependency : repository.getDependencies(artifact.getId())) {
+					try {
+						if (repository.getNode(dependency).getArtifact() instanceof RestartableArtifact) {
+							restart((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+						}
+					}
+					catch (Exception e) {
+						logger.error("Could not restart dependency: " + dependency, e);
+					}
+				}
+			}
 		}
 		catch (Exception e) {
 			logger.error("Error while restarting " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
 		}
 	}
 	
-	private void stop(StoppableArtifact artifact) {
+	private void stop(StoppableArtifact artifact, boolean recursive) {
 		logger.info("Stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
 			artifact.stop();
+			if (recursive) {
+				for (String dependency : repository.getDependencies(artifact.getId())) {
+					try {
+						if (repository.getNode(dependency).getArtifact() instanceof StoppableArtifact) {
+							stop((StoppableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+						}
+					}
+					catch (Exception e) {
+						logger.error("Could not stop dependency: " + dependency, e);
+					}
+				}
+			}
 		}
 		catch (Exception e) {
 			logger.error("Error while stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
