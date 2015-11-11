@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -72,6 +73,8 @@ public class Server implements ServiceRunner {
 	 */
 	private boolean isRepositoryLoading = false;
 	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
+	
+	private Date startupTime;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -161,7 +164,7 @@ public class Server implements ServiceRunner {
 				if (event.getState() == RepositoryState.LOAD) {
 					// if the loading is done, toggle the boolean and finish delayed actions
 					if (event.isDone()) {
-						logger.info("Repository loaded, processing nodes");
+						logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing nodes");
 						isRepositoryLoading = false;
 						orderNodes(repository, delayedNodeEvents);
 						// TODO: load in dependency order!
@@ -174,6 +177,7 @@ public class Server implements ServiceRunner {
 								run(delayedNodeEvent);
 							}
 						}
+						logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
 					}
 					else {
 						isRepositoryLoading = true;
@@ -406,6 +410,7 @@ public class Server implements ServiceRunner {
 	}
 	
 	public void start() throws IOException {
+		startupTime = new Date();
 		repository.start();
 	}
 	
