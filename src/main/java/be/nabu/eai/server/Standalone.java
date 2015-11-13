@@ -74,8 +74,7 @@ public class Standalone {
 		server.start();
 		
 		if (enableREST || enableMaven) {
-			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize);
-			http.route(null, new EventDispatcherImpl());
+			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 			if (enableREST) {
 				server.enableREST(http);
 			}
