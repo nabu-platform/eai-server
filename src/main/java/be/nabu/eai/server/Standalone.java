@@ -21,7 +21,8 @@ import be.nabu.libs.resources.api.ResourceContainer;
 public class Standalone {
 	
 	public static void main(String...args) throws IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
-		File propertiesFile = new File("server.properties");
+		String propertiesFileName = getArgument("properties", "server.properties", args);
+		File propertiesFile = new File(propertiesFileName);
 		if (propertiesFile.exists()) {
 			Properties properties = new Properties();
 			InputStream input = new BufferedInputStream(new FileInputStream(propertiesFile));
