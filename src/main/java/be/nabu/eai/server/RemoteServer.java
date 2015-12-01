@@ -101,7 +101,7 @@ public class RemoteServer implements ServiceRunner {
 	}
 
 	@Override
-	public Future<ServiceResult> run(Service service, ExecutionContext arg1, ComplexContent input, ServiceRuntimeTracker serviceRuntimeTracker, ServiceRunnableObserver... arg3) {
+	public Future<ServiceResult> run(Service service, ExecutionContext arg1, ComplexContent input, ServiceRuntimeTracker serviceRuntimeTracker, ServiceRunnableObserver...arg3) {
 		if (!(service instanceof DefinedService)) {
 			throw new IllegalArgumentException("The service has to be a defined one for remote execution");
 		}
@@ -132,8 +132,15 @@ public class RemoteServer implements ServiceRunner {
 			}
 			// it is possible that the result is simply empty (null) e.g. if the service is a java method with return type void
 			if (!Long.valueOf(0).equals(MimeUtils.getContentLength(response.getContent().getHeaders()))) {
-				XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
-				result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+				// if the content type is "text/plain", an error was sent back as a stacktrace
+				// TODO: could also send back an application/octet-stream with a serialized exception
+				if ("text/plain".equals(MimeUtils.getContentType(response.getContent().getHeaders()))) {
+					exception = new ServiceException("REMOTE-0", new String(IOUtils.toBytes((((ContentPart) response.getContent()).getReadable()))));
+				}
+				else {
+					XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
+					result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+				}
 			}
 		}
 		catch (FormatException e) {

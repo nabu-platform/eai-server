@@ -3,6 +3,8 @@ package be.nabu.eai.server.rest;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.text.ParseException;
@@ -90,7 +92,15 @@ public class ServerREST {
 		try {
 			ServiceResult serviceResult = future.get();
 			if (serviceResult.getException() != null) {
-				throw serviceResult.getException();
+				StringWriter writer = new StringWriter();
+				PrintWriter printer = new PrintWriter(writer);
+				serviceResult.getException().printStackTrace(printer);
+				printer.flush();
+				byte [] bytes = writer.toString().getBytes();
+				return new PlainMimeContentPart(null, IOUtils.wrap(bytes, true),
+					new MimeHeader("Content-Length", Integer.valueOf(bytes.length).toString()),
+					new MimeHeader("Content-Type", "text/plain")
+				);
 			}
 			ComplexContent output = serviceResult.getOutput();
 			// this is possible in some cases (e.g. void java methods)
