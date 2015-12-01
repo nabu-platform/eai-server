@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.text.ParseException;
 import java.util.concurrent.ExecutionException;
@@ -133,13 +134,13 @@ public class ServerREST {
 	
 	@GET
 	@Path("/settings/repository")
-	public URI getRepository() {
-		return server.getRepositoryRoot();
+	public URI getRepository() throws URISyntaxException {
+		return server.isEnabledRepositorySharing() ? new URI("remote:/repository") : server.getRepositoryRoot();
 	}
 	
 	@GET
 	@Path("/settings/maven")
-	public URI getMaven() {
-		return server.getRepository().getMavenRoot();
+	public URI getMaven() throws URISyntaxException {
+		return server.isEnabledRepositorySharing() ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
 	}
 }

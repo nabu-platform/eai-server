@@ -38,7 +38,9 @@ import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
 import be.nabu.libs.maven.MavenListener;
+import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
+import be.nabu.libs.resources.remote.server.ResourceREST;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
@@ -75,6 +77,7 @@ public class Server implements ServiceRunner {
 	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
 	
 	private Date startupTime;
+	private boolean enabledRepositorySharing;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -220,6 +223,12 @@ public class Server implements ServiceRunner {
 		catch (ParseException e) {
 			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
 		}
+	}
+	
+	public void enableRepository(HTTPServer server) throws IOException {
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repository.getRoot().getContainer()));
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/maven", ResourceREST.class, null, ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		this.enabledRepositorySharing = true;
 	}
 	
 	public void enableMaven(HTTPServer server) {
@@ -440,4 +449,9 @@ public class Server implements ServiceRunner {
 	public void setCacheProvider(CacheProvider cacheProvider) {
 		this.cacheProvider = cacheProvider;
 	}
+
+	public boolean isEnabledRepositorySharing() {
+		return enabledRepositorySharing;
+	}
+	
 }

@@ -57,6 +57,7 @@ public class Standalone {
 
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
+		boolean enableRepository = new Boolean(getArgument("enableRepository", "false", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
@@ -74,10 +75,13 @@ public class Standalone {
 		}
 		server.start();
 		
-		if (enableREST || enableMaven) {
+		if (enableREST || enableMaven || enableRepository) {
 			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 			if (enableREST) {
 				server.enableREST(http);
+			}
+			if (enableRepository) {
+				server.enableRepository(http);
 			}
 			if (enableMaven) {
 				server.enableMaven(http);

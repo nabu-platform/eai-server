@@ -53,11 +53,25 @@ public class RemoteServer implements ServiceRunner {
 	}
 	
 	public URI getRepositoryRoot() throws IOException, FormatException, ParseException, URISyntaxException {
-		return new URI(URIUtils.encodeURI(getSetting("repository")));
+		String repository = URIUtils.encodeURI(getSetting("repository"));
+		URI uri = new URI(repository);
+		// if we have no host, use the one from the endpoint
+		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
+			uri = new URI(repository.replace("remote:", "remote://" + endpoint.getAuthority()));
+		}
+		System.out.println("REPOSITORY: " + uri);
+		return uri;
 	}
 	
 	public URI getMavenRoot() throws IOException, FormatException, ParseException, URISyntaxException {
-		return new URI(URIUtils.encodeURI(getSetting("maven")));
+		String maven = URIUtils.encodeURI(getSetting("maven"));
+		URI uri = new URI(maven);
+		// if we have no host, use the one from the endpoint
+		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
+			uri = new URI(maven.replace("remote:", "remote://" + endpoint.getAuthority()));
+		}
+		System.out.println("MAVEN: " + uri);
+		return uri;
 	}
 
 	public void reload(String id) throws IOException, FormatException, ParseException {
