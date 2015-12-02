@@ -137,6 +137,13 @@ public class ServerREST {
 	@GET
 	@Path("/settings/repository")
 	public URI getRepository(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
+		// we send back the "original" repository the server connected to if:
+		// - we did not enable repository sharing on this server
+		// - the connection is from the same host as the server is running on (usually development mode)
+		// note that we don't send the server authority in the remote URL, the client is supposed to resolve a missing authority as the server itself (whatever that is)
+		// also note that in the beginning we would send back the repository itself IF it was already remote
+		// however it is entirely possible that the developer does have access to the server but not the repository (firewall-wise)
+		// if you want to hook up a server to a remote repository and have it report that to the developer, disable repository sharing
 		return server.isEnabledRepositorySharing() && !"true".equals(isLocal) ? new URI("remote:/repository") : server.getRepositoryRoot();
 	}
 	
