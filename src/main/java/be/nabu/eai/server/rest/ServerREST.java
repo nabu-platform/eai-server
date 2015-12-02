@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 import javax.ws.rs.GET;
+import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -26,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.server.Server;
+import be.nabu.libs.http.core.ServerHeader;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
@@ -134,13 +136,13 @@ public class ServerREST {
 	
 	@GET
 	@Path("/settings/repository")
-	public URI getRepository() throws URISyntaxException {
-		return server.isEnabledRepositorySharing() ? new URI("remote:/repository") : server.getRepositoryRoot();
+	public URI getRepository(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
+		return server.isEnabledRepositorySharing() && !"true".equals(isLocal) ? new URI("remote:/repository") : server.getRepositoryRoot();
 	}
 	
 	@GET
 	@Path("/settings/maven")
-	public URI getMaven() throws URISyntaxException {
-		return server.isEnabledRepositorySharing() ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
+	public URI getMaven(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
+		return server.isEnabledRepositorySharing() && !"true".equals(isLocal) ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
 	}
 }
