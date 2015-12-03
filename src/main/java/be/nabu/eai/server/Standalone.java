@@ -57,7 +57,7 @@ public class Standalone {
 
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
-		boolean enableRepository = new Boolean(getArgument("enableRepository", "false", args));
+		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
