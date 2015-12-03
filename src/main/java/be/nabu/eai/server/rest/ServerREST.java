@@ -95,6 +95,7 @@ public class ServerREST {
 		try {
 			ServiceResult serviceResult = future.get();
 			if (serviceResult.getException() != null) {
+				logger.error("Could not run service: " + serviceId, serviceResult.getException());
 				StringWriter writer = new StringWriter();
 				PrintWriter printer = new PrintWriter(writer);
 				serviceResult.getException().printStackTrace(printer);
