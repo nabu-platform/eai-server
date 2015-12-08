@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Repository;
+import be.nabu.eai.repository.api.ResourceRepository;
 import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
@@ -226,7 +227,7 @@ public class Server implements ServiceRunner {
 	}
 	
 	public void enableRepository(HTTPServer server) throws IOException {
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repository.getRoot().getContainer()));
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, ((ResourceRepository) repository).getRoot().getContainer()));
 		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/maven", ResourceREST.class, null, ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
 		this.enabledRepositorySharing = true;
 	}
@@ -424,7 +425,7 @@ public class Server implements ServiceRunner {
 	}
 	
 	public URI getRepositoryRoot() {
-		return ResourceUtils.getURI(repository.getRoot().getContainer());
+		return ResourceUtils.getURI(((ResourceRepository) repository).getRoot().getContainer());
 	}
 	
 	/**
