@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -18,10 +19,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.api.MavenRepository;
+import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.api.ResourceRepository;
 import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.RepositoryEvent;
+import be.nabu.eai.repository.events.NodeEvent.State;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
@@ -79,6 +82,7 @@ public class Server implements ServiceRunner {
 	
 	private Date startupTime;
 	private boolean enabledRepositorySharing;
+	private boolean isStarted;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -89,6 +93,14 @@ public class Server implements ServiceRunner {
 	public void enableREST(HTTPServer server) {
 		// make sure we intercept invoke commands
 		server.getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
+	}
+	
+	/**
+	 * The node inside the event _can_ be outdated in some reload events, this method gets the latest version of the node
+	 * It may need to be cleaned up at some point but in some cases (notably unload) you actually need access to whatever node the event was triggered upon (to shut it down properly) instead of the "latest" version
+	 */
+	private Node getNode(NodeEvent nodeEvent) {
+		return repository.getNode(nodeEvent.getId());
 	}
 	
 	public void initialize() {
@@ -111,10 +123,20 @@ public class Server implements ServiceRunner {
 					else if (nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
 							if (RestartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								restart((RestartableArtifact) nodeEvent.getNode().getArtifact(), true);
+								if (isRepositoryLoading) {
+									delayedNodeEvents.add(nodeEvent);
+								}
+								else {
+									restart((RestartableArtifact) nodeEvent.getNode().getArtifact(), true);
+								}
 							}
 							else if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								start((StartableArtifact) nodeEvent.getNode().getArtifact(), true);
+								if (isRepositoryLoading) {
+									delayedNodeEvents.add(nodeEvent);
+								}
+								else {
+									start((StartableArtifact) nodeEvent.getNode().getArtifact(), true);
+								}
 							}
 						}
 						catch (IOException e) {
@@ -146,8 +168,11 @@ public class Server implements ServiceRunner {
 					// if a node is unloaded we might need to stop something
 					if (nodeEvent.getState() == NodeEvent.State.UNLOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
-							if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
-								stop((StoppableArtifact) nodeEvent.getNode().getArtifact(), true);
+							// only proceed if the node is loaded
+							if (nodeEvent.getNode().isLoaded()) {
+								if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
+									stop((StoppableArtifact) nodeEvent.getNode().getArtifact(), true);
+								}
 							}
 						}
 						catch (IOException e) {
@@ -165,23 +190,50 @@ public class Server implements ServiceRunner {
 		repository.getEventDispatcher().subscribe(RepositoryEvent.class, new EventHandler<RepositoryEvent, Void>() {
 			@Override
 			public Void handle(RepositoryEvent event) {
-				if (event.getState() == RepositoryState.LOAD) {
+				if (event.getState() == RepositoryState.LOAD || event.getState() == RepositoryState.RELOAD) {
 					// if the loading is done, toggle the boolean and finish delayed actions
 					if (event.isDone()) {
-						logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing nodes");
+						if (isStarted) {
+							logger.info("Repository reloaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
+						}
+						else {
+							logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
+						}
 						isRepositoryLoading = false;
+						// it is possible to get multiple events for one item (e.g. if an unload of a new item triggers an initial load only to be reloaded afterwards)
+						// TODO: currently we don't check for unload as the combination of unload+load/reload does not occur just yet
+						List<String> items = new ArrayList<String>();
+						Iterator<NodeEvent> iterator = delayedNodeEvents.iterator();
+						while(iterator.hasNext()) {
+							NodeEvent next = iterator.next();
+							if (items.contains(next.getId())) {
+								iterator.remove();
+							}
+							else {
+								items.add(next.getId());
+							}
+						}
 						orderNodes(repository, delayedNodeEvents);
 						// TODO: load in dependency order!
 						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
-							if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
-								// don't recurse, on start we should be starting all the nodes
-								start(delayedNodeEvent, false);
-							}
 							if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
 								run(delayedNodeEvent);
 							}
+							else if (delayedNodeEvent.getState() == State.RELOAD && RestartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+								restart(delayedNodeEvent, false);
+							}
+							else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+								// don't recurse, on start we should be starting all the nodes
+								start(delayedNodeEvent, false);
+							}
 						}
-						logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
+						if (isStarted) {
+							logger.info("Server artifacts reloaded in: " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
+						}
+						else {
+							logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
+							isStarted = true;
+						}
 					}
 					else {
 						isRepositoryLoading = true;
@@ -197,7 +249,7 @@ public class Server implements ServiceRunner {
 		try {
 			ComplexType inputDefinition = ((DefinedService) nodeEvent.getNode().getArtifact()).getServiceInterface().getInputDefinition();
 			ServiceRuntime runtime = new ServiceRuntime(
-				((DefinedService) nodeEvent.getNode().getArtifact()),
+				((DefinedService) getNode(nodeEvent).getArtifact()),
 				repository.newExecutionContext(SystemPrincipal.ROOT)
 			);
 			runtime.setAllowCaching(false);
@@ -214,9 +266,21 @@ public class Server implements ServiceRunner {
 		}
 	}
 	
+	private void restart(NodeEvent nodeEvent, boolean recursive) {
+		try {
+			restart((RestartableArtifact) getNode(nodeEvent).getArtifact(), recursive);
+		}
+		catch (IOException e) {
+			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+		}
+		catch (ParseException e) {
+			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
+		}
+	}
+	
 	private void start(NodeEvent nodeEvent, boolean recursive) {
 		try {
-			start((StartableArtifact) nodeEvent.getNode().getArtifact(), recursive);
+			start((StartableArtifact) getNode(nodeEvent).getArtifact(), recursive);
 		}
 		catch (IOException e) {
 			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
@@ -313,12 +377,22 @@ public class Server implements ServiceRunner {
 	private void restart(RestartableArtifact artifact, boolean recursive) {
 		logger.info("Restarting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
-			artifact.restart();
+			if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+				artifact.restart();
+			}
+			else {
+				artifact.start();
+			}
 			if (recursive) {
 				for (String dependency : repository.getDependencies(artifact.getId())) {
 					try {
 						if (repository.getNode(dependency).getArtifact() instanceof RestartableArtifact) {
-							restart((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+							if (!(repository.getNode(dependency).getArtifact() instanceof StartableArtifact) || ((StartableArtifact) repository.getNode(dependency).getArtifact()).isStarted()) {
+								restart((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+							}
+							else {
+								start((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+							}
 						}
 					}
 					catch (Exception e) {
@@ -335,11 +409,13 @@ public class Server implements ServiceRunner {
 	private void stop(StoppableArtifact artifact, boolean recursive) {
 		logger.info("Stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
-			artifact.stop();
+			if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+				artifact.stop();
+			}
 			if (recursive) {
 				for (String dependency : repository.getDependencies(artifact.getId())) {
 					try {
-						if (repository.getNode(dependency).getArtifact() instanceof StoppableArtifact) {
+						if (repository.getNode(dependency).isLoaded() && repository.getNode(dependency).getArtifact() instanceof StoppableArtifact) {
 							stop((StoppableArtifact) repository.getNode(dependency).getArtifact(), recursive);
 						}
 					}

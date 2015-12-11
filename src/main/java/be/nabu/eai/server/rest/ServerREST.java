@@ -56,7 +56,13 @@ public class ServerREST {
 	private Server server;
 	
 	private SecurityContext securityContext;
-	
+
+	@Path("/reload")
+	@GET
+	public void reloadAll() {
+		repository.reloadAll();
+	}
+
 	@Path("/reload/{id}")
 	@GET
 	public void reload(@PathParam("id") String id) {

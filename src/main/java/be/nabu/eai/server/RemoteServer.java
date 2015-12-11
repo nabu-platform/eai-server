@@ -82,6 +82,14 @@ public class RemoteServer implements ServiceRunner {
 		}
 	}
 	
+	public void reloadAll() throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/reload");
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
 	public void unload(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/unload/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
