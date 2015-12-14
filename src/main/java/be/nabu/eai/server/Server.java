@@ -28,13 +28,13 @@ import be.nabu.eai.repository.events.NodeEvent.State;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
+import be.nabu.eai.server.api.ServerListener;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.authentication.api.RoleHandler;
-import be.nabu.libs.cache.api.CacheProvider;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.server.HTTPServer;
@@ -55,7 +55,6 @@ import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
-import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 
@@ -70,7 +69,6 @@ public class Server implements ServiceRunner {
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 
 	private RoleHandler roleHandler;
-	private CacheProvider cacheProvider;
 	
 	/**
 	 * This is set to true while the repository is loading
@@ -93,6 +91,14 @@ public class Server implements ServiceRunner {
 	public void enableREST(HTTPServer server) {
 		// make sure we intercept invoke commands
 		server.getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
+		for (Class<ServerListener> serverListener : getRepository().getImplementationsFor(ServerListener.class)) {
+			try {
+				serverListener.newInstance().listen(this, server);
+			}
+			catch (Exception e) {
+				logger.error("Could not initialize server listener: " + serverListener, e);
+			}
+		}
 	}
 	
 	/**
@@ -100,7 +106,12 @@ public class Server implements ServiceRunner {
 	 * It may need to be cleaned up at some point but in some cases (notably unload) you actually need access to whatever node the event was triggered upon (to shut it down properly) instead of the "latest" version
 	 */
 	private Node getNode(NodeEvent nodeEvent) {
-		return repository.getNode(nodeEvent.getId());
+		Node node = repository.getNode(nodeEvent.getId());
+		if (node == null) {
+			logger.warn("Could not resolve node for: " + nodeEvent.getId());
+			node = nodeEvent.getNode();
+		}
+		return node;
 	}
 	
 	public void initialize() {
@@ -216,15 +227,20 @@ public class Server implements ServiceRunner {
 						orderNodes(repository, delayedNodeEvents);
 						// TODO: load in dependency order!
 						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
-							if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
-								run(delayedNodeEvent);
+							try {
+								if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
+									run(delayedNodeEvent);
+								}
+								else if (delayedNodeEvent.getState() == State.RELOAD && RestartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+									restart(delayedNodeEvent, false);
+								}
+								else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+									// don't recurse, on start we should be starting all the nodes
+									start(delayedNodeEvent, false);
+								}
 							}
-							else if (delayedNodeEvent.getState() == State.RELOAD && RestartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
-								restart(delayedNodeEvent, false);
-							}
-							else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
-								// don't recurse, on start we should be starting all the nodes
-								start(delayedNodeEvent, false);
+							catch (Throwable e) {
+								logger.error("Could not run delayed node event: " + delayedNodeEvent.getState() + " on " + delayedNodeEvent.getId(), e);
 							}
 						}
 						if (isStarted) {
@@ -435,13 +451,11 @@ public class Server implements ServiceRunner {
 	}
 
 	@Override
-	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRuntimeTracker tracker, ServiceRunnableObserver...observers) {
+	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRunnableObserver...observers) {
 		List<ServiceRunnableObserver> allObservers = new ArrayList<ServiceRunnableObserver>(observers.length + 1);
 		allObservers.add(new RunningServiceObserver());
 		allObservers.addAll(Arrays.asList(observers));
 		ServiceRuntime serviceRuntime = new ServiceRuntime(service, executionContext);
-		serviceRuntime.setRuntimeTracker(tracker);
-		serviceRuntime.setCache(cacheProvider);
 		final ServiceRunnable runnable = new ServiceRunnable(serviceRuntime, input, allObservers.toArray(new ServiceRunnableObserver[allObservers.size()]));
 		// in the future could actually run this async in a thread pool but for now it is assumed that all originating systems have their own thread pool
 		// for example the messaging system runs in its own thread pool, as does the http server etc
@@ -517,18 +531,7 @@ public class Server implements ServiceRunner {
 		});
 	}
 
-	@Override
-	public CacheProvider getCacheProvider() {
-		return cacheProvider;
-	}
-
-	@Override
-	public void setCacheProvider(CacheProvider cacheProvider) {
-		this.cacheProvider = cacheProvider;
-	}
-
 	public boolean isEnabledRepositorySharing() {
 		return enabledRepositorySharing;
 	}
-	
 }
