@@ -58,6 +58,7 @@ public class Standalone {
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
 		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
+		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "false", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
@@ -82,6 +83,7 @@ public class Standalone {
 			}
 			if (enableRepository) {
 				server.enableRepository(http);
+				server.setForceRemoteRepository(forceRemoteRepository);
 			}
 			if (enableMaven) {
 				server.enableMaven(http);

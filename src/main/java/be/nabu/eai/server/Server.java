@@ -79,7 +79,7 @@ public class Server implements ServiceRunner {
 	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
 	
 	private Date startupTime;
-	private boolean enabledRepositorySharing;
+	private boolean enabledRepositorySharing, forceRemoteRepository;
 	private boolean isStarted;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
@@ -533,5 +533,13 @@ public class Server implements ServiceRunner {
 
 	public boolean isEnabledRepositorySharing() {
 		return enabledRepositorySharing;
+	}
+
+	public boolean isForceRemoteRepository() {
+		return forceRemoteRepository;
+	}
+
+	public void setForceRemoteRepository(boolean forceRemoteRepository) {
+		this.forceRemoteRepository = forceRemoteRepository;
 	}
 }

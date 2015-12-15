@@ -151,12 +151,12 @@ public class ServerREST {
 		// also note that in the beginning we would send back the repository itself IF it was already remote
 		// however it is entirely possible that the developer does have access to the server but not the repository (firewall-wise)
 		// if you want to hook up a server to a remote repository and have it report that to the developer, disable repository sharing
-		return server.isEnabledRepositorySharing() && !"true".equals(isLocal) ? new URI("remote:/repository") : server.getRepositoryRoot();
+		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/repository") : server.getRepositoryRoot();
 	}
 	
 	@GET
 	@Path("/settings/maven")
 	public URI getMaven(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
-		return server.isEnabledRepositorySharing() && !"true".equals(isLocal) ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
+		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
 	}
 }
