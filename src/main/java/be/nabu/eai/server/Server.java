@@ -78,7 +78,7 @@ public class Server implements ServiceRunner {
 	private boolean isRepositoryLoading = false;
 	private List<NodeEvent> delayedNodeEvents = new ArrayList<NodeEvent>();
 	
-	private Date startupTime;
+	private Date startupTime, reloadTime;
 	private boolean enabledRepositorySharing, forceRemoteRepository;
 	private boolean isStarted;
 	
@@ -205,7 +205,7 @@ public class Server implements ServiceRunner {
 					// if the loading is done, toggle the boolean and finish delayed actions
 					if (event.isDone()) {
 						if (isStarted) {
-							logger.info("Repository reloaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
+							logger.info("Repository reloaded in " + ((new Date().getTime() - reloadTime.getTime()) / 1000) + "s, processing artifacts");
 						}
 						else {
 							logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
@@ -244,7 +244,7 @@ public class Server implements ServiceRunner {
 							}
 						}
 						if (isStarted) {
-							logger.info("Server artifacts reloaded in: " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
+							logger.info("Server artifacts reloaded in: " + ((new Date().getTime() - reloadTime.getTime()) / 1000) + "s");
 						}
 						else {
 							logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
@@ -254,6 +254,7 @@ public class Server implements ServiceRunner {
 					else {
 						isRepositoryLoading = true;
 						delayedNodeEvents.clear();
+						reloadTime = new Date();
 					}
 				}
 				return null;
