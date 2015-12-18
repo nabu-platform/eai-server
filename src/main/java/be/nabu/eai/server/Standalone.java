@@ -60,11 +60,14 @@ public class Standalone {
 		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
 		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "false", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
+		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
+		repositoryInstance.enableMetrics(enableMetrics);
+		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
 		// set the server as the runner for the repository
