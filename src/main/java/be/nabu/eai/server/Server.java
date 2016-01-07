@@ -432,7 +432,7 @@ public class Server implements ServiceRunner {
 			if (recursive) {
 				for (String dependency : repository.getDependencies(artifact.getId())) {
 					try {
-						if (repository.getNode(dependency).isLoaded() && repository.getNode(dependency).getArtifact() instanceof StoppableArtifact) {
+						if (repository.getNode(dependency) != null && repository.getNode(dependency).isLoaded() && repository.getNode(dependency).getArtifact() instanceof StoppableArtifact) {
 							stop((StoppableArtifact) repository.getNode(dependency).getArtifact(), recursive);
 						}
 					}
