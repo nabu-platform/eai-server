@@ -61,8 +61,10 @@ public class Standalone {
 		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "false", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
+		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
+		String serverName = getArgument("name", null, args);
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
@@ -70,6 +72,7 @@ public class Standalone {
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
+		server.setName(serverName);
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
 		
@@ -77,6 +80,7 @@ public class Standalone {
 			repositoryInstance.setLocalMavenServer(new URI(URIUtils.encodeURI(localMavenServer)));
 			repositoryInstance.setUpdateMavenSnapshots(updateMavenSnapshots);
 		}
+		server.setAnonymousIsRoot(anonymousIsRoot);
 		server.start();
 		
 		if (enableREST || enableMaven || enableRepository) {

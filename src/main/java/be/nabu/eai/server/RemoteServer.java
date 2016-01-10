@@ -71,6 +71,10 @@ public class RemoteServer implements ServiceRunner {
 		System.out.println("MAVEN: " + uri);
 		return uri;
 	}
+	
+	public String getName() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
+		return URIUtils.encodeURI(getSetting("name"));
+	}
 
 	public void reload(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/reload/" + id);
@@ -185,4 +189,5 @@ public class RemoteServer implements ServiceRunner {
 	public Principal getPrincipal() {
 		return principal;
 	}
+	
 }

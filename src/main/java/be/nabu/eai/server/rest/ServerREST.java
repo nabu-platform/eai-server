@@ -8,6 +8,7 @@ import java.io.StringWriter;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
+import java.security.Principal;
 import java.text.ParseException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -26,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
+import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.Server;
 import be.nabu.libs.http.core.ServerHeader;
 import be.nabu.libs.services.api.DefinedService;
@@ -55,6 +57,7 @@ public class ServerREST {
 	@Context
 	private Server server;
 	
+	@Context
 	private SecurityContext securityContext;
 
 	@Path("/reload")
@@ -97,7 +100,11 @@ public class ServerREST {
 		ComplexContent input = binding.unmarshal(content, new Window[0]);
 		
 		// need to return the output & the id of the thread it is running in
-		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(securityContext == null ? null : securityContext.getUserPrincipal()), input);
+		Principal principal = securityContext == null ? null : securityContext.getUserPrincipal();
+		if (principal == null && server.isAnonymousIsRoot()) {
+			principal = SystemPrincipal.ROOT;
+		}
+		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
 		try {
 			ServiceResult serviceResult = future.get();
 			if (serviceResult.getException() != null) {
@@ -159,4 +166,11 @@ public class ServerREST {
 	public URI getMaven(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
 		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
 	}
+	
+	@GET
+	@Path("/settings/name")
+	public String getName() {
+		return server.getName();
+	}
+	
 }

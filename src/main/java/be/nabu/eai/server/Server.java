@@ -1,7 +1,9 @@
 package be.nabu.eai.server;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,9 +66,11 @@ public class Server implements ServiceRunner {
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
 	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
+	private String name;
 	private MavenRepository repository;
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
+	private boolean anonymousIsRoot;
 
 	private RoleHandler roleHandler;
 	
@@ -542,5 +546,29 @@ public class Server implements ServiceRunner {
 
 	public void setForceRemoteRepository(boolean forceRemoteRepository) {
 		this.forceRemoteRepository = forceRemoteRepository;
+	}
+
+	public boolean isAnonymousIsRoot() {
+		return anonymousIsRoot;
+	}
+
+	public void setAnonymousIsRoot(boolean anonymousIsRoot) {
+		this.anonymousIsRoot = anonymousIsRoot;
+	}
+
+	public String getName() {
+		if (name == null) {
+			try {
+				name = InetAddress.getLocalHost().getHostName();
+			}
+			catch (UnknownHostException e) {
+				name = "unknown";
+			}
+		}
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
 	}
 }
