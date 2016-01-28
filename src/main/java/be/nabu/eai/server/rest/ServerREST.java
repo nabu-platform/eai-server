@@ -104,6 +104,17 @@ public class ServerREST {
 		if (principal == null && server.isAnonymousIsRoot()) {
 			principal = SystemPrincipal.ROOT;
 		}
+		
+		final Header header = MimeUtils.getHeader("Run-As", headers);
+		if (header != null) {
+			principal = new Principal() {
+				@Override
+				public String getName() {
+					return header.getValue();
+				}
+			};
+		}
+		
 		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
 		try {
 			ServiceResult serviceResult = future.get();

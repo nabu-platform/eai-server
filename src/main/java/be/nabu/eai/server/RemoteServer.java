@@ -125,7 +125,7 @@ public class RemoteServer implements ServiceRunner {
 	}
 
 	@Override
-	public Future<ServiceResult> run(Service service, ExecutionContext arg1, ComplexContent input, ServiceRunnableObserver...arg3) {
+	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRunnableObserver...arg3) {
 		if (!(service instanceof DefinedService)) {
 			throw new IllegalArgumentException("The service has to be a defined one for remote execution");
 		}
@@ -146,6 +146,9 @@ public class RemoteServer implements ServiceRunner {
 					new MimeHeader("Host", endpoint.getAuthority())
 				)
 			);
+			if (executionContext.getSecurityContext().getPrincipal() != null) {
+				request.getContent().setHeader(new MimeHeader("Run-As", executionContext.getSecurityContext().getPrincipal().getName()));
+			}
 			HTTPResponse response = request(request);
 			
 			if (response.getCode() != 200) {
