@@ -20,6 +20,7 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
@@ -95,7 +96,7 @@ public class Server implements ServiceRunner {
 	public void enableREST(HTTPServer server) {
 		// make sure we intercept invoke commands
 		server.getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
-		for (Class<ServerListener> serverListener : getRepository().getImplementationsFor(ServerListener.class)) {
+		for (Class<ServerListener> serverListener : EAIRepositoryUtils.getImplementationsFor(getRepository().getClassLoader(), ServerListener.class)) {
 			try {
 				serverListener.newInstance().listen(this, server);
 			}
@@ -516,6 +517,7 @@ public class Server implements ServiceRunner {
 	
 	public void start() throws IOException {
 		startupTime = new Date();
+		Thread.currentThread().setContextClassLoader(repository.getClassLoader());
 		repository.start();
 	}
 	

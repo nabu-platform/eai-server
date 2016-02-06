@@ -25,7 +25,6 @@ import javax.ws.rs.core.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.Server;
@@ -82,15 +81,10 @@ public class ServerREST {
 	@POST
 	public Part invoke(@PathParam("service") String serviceId, InputStream content, Header...headers) throws IOException, ParseException, ServiceException {
 		logger.debug("Invoking: {}", serviceId);
-		Node node = repository.getNode(serviceId);
-		if (node == null) {
-			throw new IllegalArgumentException("Can not find the node: " + serviceId);
-		}
-		DefinedService service = (DefinedService) node.getArtifact();
+		DefinedService service = (DefinedService) repository.resolve(serviceId);
 		if (service == null) {
-			throw new IllegalArgumentException("Can not find a service with the id: " + serviceId);
+			throw new IllegalArgumentException("Can not find the service with id: " + serviceId);
 		}
-		
 		String contentType = MimeUtils.getContentType(headers);
 
 		UnmarshallableBinding binding = MediaType.APPLICATION_JSON.equals(contentType) 
