@@ -169,7 +169,7 @@ public class ServerREST {
 	@GET
 	@Path("/settings/maven")
 	public URI getMaven(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
-		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/maven") : server.getRepository().getMavenRoot();
+		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/modules") : server.getRepository().getMavenRoot();
 	}
 	
 	@GET

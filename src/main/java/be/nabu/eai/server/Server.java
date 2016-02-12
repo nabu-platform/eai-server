@@ -314,7 +314,7 @@ public class Server implements ServiceRunner {
 	
 	public void enableRepository(HTTPServer server) throws IOException {
 		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, ((ResourceRepository) repository).getRoot().getContainer()));
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/maven", ResourceREST.class, null, ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
 		this.enabledRepositorySharing = true;
 	}
 	
