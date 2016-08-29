@@ -173,6 +173,7 @@ public class RemoteServer implements ServiceRunner {
 				}
 				else {
 					XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
+					resultBinding.setAllowSuperTypes(true);
 					result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
 				}
 			}

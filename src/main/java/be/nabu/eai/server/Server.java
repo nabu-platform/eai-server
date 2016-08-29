@@ -7,11 +7,14 @@ import java.net.UnknownHostException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -545,14 +548,99 @@ public class Server implements ServiceRunner {
 	/**
 	 * TODO: Only checks direct references atm, not recursive ones
 	 */
-	private static void orderNodes(final Repository repository, List<NodeEvent> events) {
-		Collections.sort(events, new Comparator<NodeEvent>() {
+	private void orderNodes(final Repository repository, List<NodeEvent> events) {
+		Comparator<NodeEvent> comparator = new Comparator<NodeEvent>() {
 			@Override
 			public int compare(NodeEvent o1, NodeEvent o2) {
-				List<String> references = repository.getReferences(o1.getId());
-				return references == null || !references.contains(o2.getId()) ? 0 : 1;
+//				List<String> references = repository.getReferences(o1.getId());
+//				if (references != null && references.contains(o2.getId())) {
+//					return 1;
+//				}
+//				references = repository.getReferences(o2.getId());
+//				if (references != null && references.contains(o1.getId())) {
+//					return -1;
+//				}
+//				return 0;
+				System.out.println("Checking: " + o1.getId() + " vs " + o2.getId());
+				if (isInReferences(repository, o1.getId(), o2.getId(), new ArrayList<String>())) {
+					System.out.println("\t1");
+					return 1;
+				}
+				else if (isInReferences(repository, o2.getId(), o1.getId(), new ArrayList<String>())) {
+					System.out.println("\t-1");
+					return -1;
+				}
+				System.out.println("\t0");
+				return 0;
 			}
-		});
+		};
+		Map<String, Set<String>> allReferences = new HashMap<String, Set<String>>();
+		for (int i = 0; i < events.size(); i++) {
+			Set<String> references = new HashSet<String>();
+			getAllReferences(repository, events.get(i).getId(), new ArrayList<String>(), references);
+			allReferences.put(events.get(i).getId(), references);
+		}
+		Set<String> warnings = new HashSet<String>();
+		boolean changed = true;
+		sorting: while(changed) {
+			changed = false;
+			for (int i = 0; i < events.size(); i++) {
+				for (int j = 0; j < events.size(); j++) {
+					if (i == j) {
+						continue;
+					}
+					// if i is before j but requires it in references, try to switch 
+					boolean iDependsOnJ = allReferences.get(events.get(i).getId()).contains(events.get(j).getId());
+					boolean jDependsOnI = allReferences.get(events.get(j).getId()).contains(events.get(i).getId());
+					if (jDependsOnI && iDependsOnJ) {
+						// to have each warning only once, not once in each direction
+						int comparison = events.get(i).getId().compareTo(events.get(j).getId());
+						warnings.add("Found circular reference between: " + events.get(comparison < 0 ? i : j) + " and " + events.get(comparison < 0 ? j : i));
+					}
+					else if ((iDependsOnJ && i < j) || (jDependsOnI && j < i)) {
+						NodeEvent nodeEvent = events.get(i);
+						events.set(i, events.get(j));
+						events.set(j, nodeEvent);
+						changed = true;
+						continue sorting;
+					}
+				}
+			}
+		}
+		for (String warning : warnings) {
+			logger.warn(warning);
+		}
+//		Collections.sort(events, comparator);
+	}
+	
+	private static void getAllReferences(Repository repository, String nodeId, List<String> searchedNodes, Set<String> result) {
+		searchedNodes.add(nodeId);
+		List<String> references = repository.getReferences(nodeId);
+		result.addAll(references);
+		for (String reference : references) {
+			if (!searchedNodes.contains(reference)) {
+				getAllReferences(repository, reference, searchedNodes, result);
+			}
+		}
+	}
+	
+	private static boolean isInReferences(Repository repository, String startingNode, String searchNode, List<String> searchedNodes) {
+		searchedNodes.add(startingNode);
+		List<String> references = repository.getReferences(startingNode);
+		if (references.contains(searchNode)) {
+			return true;
+		}
+		else {
+			for (String reference : references) {
+				if (!searchedNodes.contains(reference)) {
+					boolean inReferences = isInReferences(repository, reference, searchNode, searchedNodes);
+					if (inReferences) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	public boolean isEnabledRepositorySharing() {
