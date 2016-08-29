@@ -20,6 +20,7 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Node;
@@ -29,6 +30,7 @@ import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.NodeEvent.State;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
+import be.nabu.eai.repository.util.CombinedAuthenticator;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.api.ServerListener;
@@ -41,6 +43,7 @@ import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.server.HTTPServer;
+import be.nabu.libs.http.server.BasicAuthenticationHandler;
 import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
@@ -58,6 +61,7 @@ import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 
@@ -91,6 +95,19 @@ public class Server implements ServiceRunner {
 		this.roleHandler = roleHandler;
 		this.repository = repository;
 		initialize();
+	}
+	
+	public boolean enableSecurity(HTTPServer server, String authenticationService, String roleHandlerService) {
+		if (authenticationService != null) {
+			Artifact resolve = repository.resolve(authenticationService);
+			if (resolve == null) {
+				logger.error("Can not find authentication service, disabling rest");
+				return false;
+			}
+			PasswordAuthenticator passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
+			server.getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null)));
+		}
+		return true;
 	}
 
 	public void enableREST(HTTPServer server) {

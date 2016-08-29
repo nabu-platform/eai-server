@@ -72,6 +72,13 @@ public class RemoteServer implements ServiceRunner {
 		return uri;
 	}
 	
+	public Boolean requiresAuthentication() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
+		String setting = getSetting("authentication");
+		boolean result = setting == null ? false : Boolean.parseBoolean(setting);
+		System.out.println("Server requires authentication: " + result);
+		return result;
+	}
+	
 	public String getName() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
 		return URIUtils.encodeURI(getSetting("name"));
 	}

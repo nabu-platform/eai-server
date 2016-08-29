@@ -62,6 +62,8 @@ public class Standalone {
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
+		String authenticationService = getArgument("authentication", null, args);
+		String roleService = getArgument("role", null, args);
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		String serverName = getArgument("name", null, args);
@@ -85,6 +87,11 @@ public class Standalone {
 		
 		if (enableREST || enableMaven || enableRepository) {
 			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
+			if (authenticationService != null) {
+				if (!server.enableSecurity(http, authenticationService, roleService)) {
+					return;
+				}
+			}
 			if (enableREST) {
 				server.enableREST(http);
 			}
