@@ -71,10 +71,10 @@ public class Standalone {
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
 		repositoryInstance.enableMetrics(enableMetrics);
+		repositoryInstance.setName(serverName);
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
-		server.setName(serverName);
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
 		
