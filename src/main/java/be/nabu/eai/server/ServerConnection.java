@@ -24,6 +24,7 @@ public class ServerConnection {
 	private Integer port;
 	private SSLContext context;
 	private Principal principal;
+	private String name;
 	
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port) {
 		this.context = context;
@@ -42,12 +43,15 @@ public class ServerConnection {
 	}
 	
 	public String getName() {
-		try {
-			return getRemote().getName();
+		if (name == null) {
+			try {
+				name = getRemote().getName();
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
 		}
-		catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		return name;
 	}
 	
 	public URI getRepositoryRoot() throws IOException {
