@@ -1,9 +1,7 @@
 package be.nabu.eai.server;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,8 +28,8 @@ import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.api.ResourceRepository;
 import be.nabu.eai.repository.events.NodeEvent;
-import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.NodeEvent.State;
+import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
 import be.nabu.eai.repository.util.CombinedAuthenticator;
 import be.nabu.eai.repository.util.NodeUtils;
@@ -74,7 +72,6 @@ public class Server implements ServiceRunner {
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
 	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
-	private String name;
 	private MavenRepository repository;
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
@@ -664,18 +661,6 @@ public class Server implements ServiceRunner {
 	}
 
 	public String getName() {
-		if (name == null) {
-			try {
-				name = InetAddress.getLocalHost().getHostName();
-			}
-			catch (UnknownHostException e) {
-				name = "unknown";
-			}
-		}
-		return name;
-	}
-
-	public void setName(String name) {
-		this.name = name;
+		return repository.getName();
 	}
 }
