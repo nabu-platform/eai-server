@@ -67,11 +67,13 @@ public class Standalone {
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		String serverName = getArgument("name", null, args);
+		String groupName = getArgument("group", null, args);
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
 		repositoryInstance.enableMetrics(enableMetrics);
 		repositoryInstance.setName(serverName);
+		repositoryInstance.setGroup(groupName == null ? serverName : groupName);
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
