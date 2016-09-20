@@ -153,8 +153,8 @@ public class RemoteServer implements ServiceRunner {
 					new MimeHeader("Host", endpoint.getAuthority())
 				)
 			);
-			if (executionContext.getSecurityContext().getPrincipal() != null) {
-				request.getContent().setHeader(new MimeHeader("Run-As", executionContext.getSecurityContext().getPrincipal().getName()));
+			if (executionContext.getSecurityContext().getToken() != null) {
+				request.getContent().setHeader(new MimeHeader("Run-As", executionContext.getSecurityContext().getToken().getName()));
 			}
 			HTTPResponse response = request(request);
 			

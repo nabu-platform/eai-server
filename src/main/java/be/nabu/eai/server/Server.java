@@ -90,6 +90,7 @@ public class Server implements ServiceRunner {
 	private Date startupTime, reloadTime;
 	private boolean enabledRepositorySharing, forceRemoteRepository;
 	private boolean isStarted;
+	private PasswordAuthenticator passwordAuthenticator;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -104,7 +105,7 @@ public class Server implements ServiceRunner {
 				logger.error("Can not find authentication service, disabling rest");
 				return false;
 			}
-			PasswordAuthenticator passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
+			passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
 			server.getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null)));
 		}
 		return true;
@@ -230,6 +231,8 @@ public class Server implements ServiceRunner {
 							logger.info("Repository reloaded in " + ((new Date().getTime() - reloadTime.getTime()) / 1000) + "s, processing artifacts");
 						}
 						else {
+							// TODO: find any modules that want to hook into the server after load (not reload?) so we can for instance register a global security handler etc
+							// TODO: want to do this _before_ starting everything up? once the http servers are up, they can start firing requests, if this happens before for example security handlers are set...set are screwed
 							logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
 						}
 						isRepositoryLoading = false;
@@ -663,4 +666,9 @@ public class Server implements ServiceRunner {
 	public String getName() {
 		return repository.getName();
 	}
+
+	public PasswordAuthenticator getPasswordAuthenticator() {
+		return passwordAuthenticator;
+	}
+	
 }

@@ -9,7 +9,13 @@ import java.net.URISyntaxException;
 import java.util.Properties;
 import java.io.BufferedInputStream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import be.nabu.eai.repository.EAIResourceRepository;
+import be.nabu.eai.repository.util.SystemPrincipal;
+import be.nabu.libs.artifacts.api.Artifact;
+import be.nabu.libs.authentication.api.PermissionHandler;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.server.HTTPServer;
@@ -17,8 +23,12 @@ import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.api.ResourceContainer;
+import be.nabu.libs.services.api.DefinedService;
+import be.nabu.libs.services.pojo.POJOUtils;
 
 public class Standalone {
+	
+	private static Logger logger = LoggerFactory.getLogger(Standalone.class);
 	
 	public static void main(String...args) throws IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
 		String propertiesFileName = getArgument("properties", "server.properties", args);
@@ -64,6 +74,7 @@ public class Standalone {
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
 		String authenticationService = getArgument("authentication", null, args);
 		String roleService = getArgument("role", null, args);
+		String permissionService = getArgument("permission", null, args);
 		
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		String serverName = getArgument("name", null, args);
@@ -86,7 +97,27 @@ public class Standalone {
 		}
 		server.setAnonymousIsRoot(anonymousIsRoot);
 		server.start();
+
+		if (roleService != null) {
+			Artifact resolve = repositoryInstance.resolve(roleService);
+			if (resolve == null) {
+				logger.error("Invalid role service: " + roleService);
+			}
+			else {
+				repositoryInstance.setRoleHandler(POJOUtils.newProxy(RoleHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
+			}
+		}
 		
+		if (permissionService != null) {
+			Artifact resolve = repositoryInstance.resolve(permissionService);
+			if (resolve == null) {
+				logger.error("Invalid permission service: " + permissionService);
+			}
+			else {
+				repositoryInstance.setPermissionHandler(POJOUtils.newProxy(PermissionHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
+			}
+		}
+
 		if (enableREST || enableMaven || enableRepository) {
 			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 			if (authenticationService != null) {

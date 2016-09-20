@@ -8,7 +8,6 @@ import java.io.StringWriter;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
-import java.security.Principal;
 import java.text.ParseException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -28,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.Server;
+import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.http.core.ServerHeader;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ServiceException;
@@ -94,19 +94,14 @@ public class ServerREST {
 		ComplexContent input = binding.unmarshal(content, new Window[0]);
 		
 		// need to return the output & the id of the thread it is running in
-		Principal principal = securityContext == null ? null : securityContext.getUserPrincipal();
+		Token principal = securityContext == null ? null : (Token) securityContext.getUserPrincipal();
 		if (principal == null && server.isAnonymousIsRoot()) {
 			principal = SystemPrincipal.ROOT;
 		}
 		
 		final Header header = MimeUtils.getHeader("Run-As", headers);
 		if (header != null) {
-			principal = new Principal() {
-				@Override
-				public String getName() {
-					return header.getValue();
-				}
-			};
+			principal = new SystemPrincipal(header.getValue());
 		}
 		
 		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
