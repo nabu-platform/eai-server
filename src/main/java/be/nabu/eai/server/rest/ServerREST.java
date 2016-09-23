@@ -173,4 +173,23 @@ public class ServerREST {
 		return server.getName();
 	}
 	
+	@GET
+	@Path("/snapshot/{id}")
+	public void snapshotRepository(@PathParam("id") String id) throws IOException {
+		server.snapshotRepository(id.replace('.', '/'));
+	}
+	
+	@GET
+	@Path("/release/{id}")
+	public void releaseRepository(@PathParam("id") String id) throws IOException {
+		server.releaseRepository(id.replace('.', '/'));
+		repository.reload(id);
+	}
+
+	@GET
+	@Path("/restore/{id}")
+	public void restoreRepository(@PathParam("id") String id) throws IOException {
+		server.restoreRepository(id.replace('.', '/'));
+		repository.reload(id);
+	}
 }

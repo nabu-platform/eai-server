@@ -91,6 +91,30 @@ public class RemoteServer implements ServiceRunner {
 		}
 	}
 	
+	public void snapshot(String id) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/snapshot/" + id);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
+	public void release(String id) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/release/" + id);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
+	public void restore(String id) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/restore/" + id);
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (response.getCode() != 200) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
 	public void reloadAll() throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/reload");
 		HTTPResponse response = request(HTTPUtils.get(target));

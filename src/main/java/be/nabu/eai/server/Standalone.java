@@ -23,6 +23,7 @@ import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.api.ResourceContainer;
+import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.pojo.POJOUtils;
 
@@ -65,6 +66,7 @@ public class Standalone {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
 		}
 
+		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", "false", args));
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
 		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
@@ -81,13 +83,14 @@ public class Standalone {
 		String groupName = getArgument("group", null, args);
 		
 		// create the repository
-		EAIResourceRepository repositoryInstance = new EAIResourceRepository(repositoryRoot, mavenRoot);
+		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
 		repositoryInstance.enableMetrics(enableMetrics);
 		repositoryInstance.setName(serverName);
 		repositoryInstance.setGroup(groupName == null ? serverName : groupName);
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
+		server.setEnableSnapshots(enableSnapshots);
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
 		

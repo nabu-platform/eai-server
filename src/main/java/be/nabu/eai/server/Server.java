@@ -51,7 +51,10 @@ import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
 import be.nabu.libs.maven.MavenListener;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
+import be.nabu.libs.resources.api.Resource;
+import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.remote.server.ResourceREST;
+import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
@@ -65,6 +68,7 @@ import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
+import be.nabu.utils.aspects.AspectUtils;
 
 public class Server implements ServiceRunner {
 	
@@ -76,6 +80,7 @@ public class Server implements ServiceRunner {
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 	private boolean anonymousIsRoot;
+	private boolean enableSnapshots;
 
 	private RoleHandler roleHandler;
 	
@@ -333,9 +338,57 @@ public class Server implements ServiceRunner {
 	}
 	
 	public void enableRepository(HTTPServer server) throws IOException {
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, ((ResourceRepository) repository).getRoot().getContainer()));
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
+		if (AspectUtils.hasAspects(repositoryRoot)) {
+			List<Object> aspects = AspectUtils.aspects(repositoryRoot);
+			repositoryRoot = (ResourceContainer<?>) aspects.get(0);
+		}
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repositoryRoot));
+		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
 		this.enabledRepositorySharing = true;
+	}
+	
+	public void snapshotRepository(String path) throws IOException {
+		if (enableSnapshots) {
+			ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
+			Resource resolve = ResourceUtils.resolve(repositoryRoot, path);
+			if (resolve != null) {
+				logger.info("Snapshotting: " + ResourceUtils.getURI(resolve) + " / " + resolve.hashCode());
+				// snapshot the parent non-recursively because you will likely delete the child resource and we don't want that change affecting lookups until you persist it
+				if (resolve.getParent() != null) {
+					SnapshotUtils.snapshot(resolve.getParent(), false);
+				}
+				SnapshotUtils.snapshot(resolve, true);
+			}
+		}
+	}
+	public void releaseRepository(String path) throws IOException {
+		if (enableSnapshots) {
+			ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
+			Resource resolve = ResourceUtils.resolve(repositoryRoot, path);
+			if (resolve != null) {
+				logger.info("Releasing: " + ResourceUtils.getURI(resolve));
+				if (resolve.getParent() != null) {
+					SnapshotUtils.release(resolve.getParent(), false);
+				}
+				SnapshotUtils.release(resolve, true);
+			}
+		}
+	}
+	public void restoreRepository(String path) throws IOException {
+		if (enableSnapshots) {
+			ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
+			Resource resolve = ResourceUtils.resolve(repositoryRoot, path);
+			if (resolve != null && SnapshotUtils.isSnapshotted(resolve)) {
+				logger.info("Restoring: " + ResourceUtils.getURI(resolve));
+				SnapshotUtils.restore(resolve, true);
+			}
+			// release it to bring it back in sync
+			releaseRepository(path);
+		}
+		else {
+			throw new IllegalStateException("Snapshotting is not enabled on this server, a restore is impossible");
+		}
 	}
 	
 	public void enableMaven(HTTPServer server) {
@@ -670,5 +723,12 @@ public class Server implements ServiceRunner {
 	public PasswordAuthenticator getPasswordAuthenticator() {
 		return passwordAuthenticator;
 	}
-	
+
+	public boolean isEnableSnapshots() {
+		return enableSnapshots;
+	}
+
+	public void setEnableSnapshots(boolean enableSnapshots) {
+		this.enableSnapshots = enableSnapshots;
+	}
 }
