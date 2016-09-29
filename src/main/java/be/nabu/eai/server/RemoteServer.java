@@ -82,11 +82,15 @@ public class RemoteServer implements ServiceRunner {
 	public String getName() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
 		return URIUtils.encodeURI(getSetting("name"));
 	}
+	
+	public static boolean isOk(int code) {
+		return code >= 200 && code < 300;
+	}
 
 	public void reload(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/reload/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -94,7 +98,7 @@ public class RemoteServer implements ServiceRunner {
 	public void snapshot(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/snapshot/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -102,7 +106,7 @@ public class RemoteServer implements ServiceRunner {
 	public void release(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/release/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -110,7 +114,7 @@ public class RemoteServer implements ServiceRunner {
 	public void restore(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/restore/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -118,7 +122,7 @@ public class RemoteServer implements ServiceRunner {
 	public void reloadAll() throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/reload");
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -126,7 +130,7 @@ public class RemoteServer implements ServiceRunner {
 	public void unload(String id) throws IOException, FormatException, ParseException {
 		URI target = URIUtils.getChild(endpoint, "/unload/" + id);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 	}
@@ -134,7 +138,7 @@ public class RemoteServer implements ServiceRunner {
 	private String getSetting(String name) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
 		URI target = URIUtils.getChild(endpoint, "/settings/" + name);
 		HTTPResponse response = request(HTTPUtils.get(target));
-		if (response.getCode() != 200) {
+		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 		}
 		if (!(response.getContent() instanceof ContentPart)) {
@@ -182,7 +186,7 @@ public class RemoteServer implements ServiceRunner {
 			}
 			HTTPResponse response = request(request);
 			
-			if (response.getCode() != 200) {
+			if (!isOk(response.getCode())) {
 				throw new ServiceException("REMOTE-1", "Remote server code " + response.getCode() + ": " + response.getMessage(), response.getCode(), response.getMessage());
 			}
 			if (!(response.getContent() instanceof ContentPart)) {
