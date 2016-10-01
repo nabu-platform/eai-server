@@ -13,6 +13,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.EAIResourceRepository;
+import be.nabu.eai.repository.api.LicenseManager;
+import be.nabu.eai.repository.util.LicenseManagerImpl;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.api.PermissionHandler;
@@ -22,10 +24,16 @@ import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
+import be.nabu.libs.resources.api.ReadableResource;
+import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.pojo.POJOUtils;
+import be.nabu.utils.io.IOUtils;
+import be.nabu.utils.io.api.ByteBuffer;
+import be.nabu.utils.io.api.ReadableContainer;
+import be.nabu.utils.security.SecurityUtils;
 
 public class Standalone {
 	
@@ -61,6 +69,38 @@ public class Standalone {
 			throw new IOException("The directory for the repository does not exist: " + repository);
 		}
 		
+		LicenseManager licenseManager = null;
+		String licenseFolder = getArgument("licenses", null, args);
+		if (licenseFolder != null) {
+			URI licenses = new URI(URIUtils.encodeURI(licenseFolder));
+			ResourceContainer<?> licenseRoot = licenses == null ? null : (ResourceContainer<?>) ResourceFactory.getInstance().resolve(licenses, null);
+			if (licenseRoot == null) {
+				throw new RuntimeException("The configured license folder is invalid: " + licenseFolder);
+			}
+			else {
+				licenseManager = new LicenseManagerImpl();
+				for (Resource resource : licenseRoot) {
+					if (resource instanceof ReadableResource) {
+						try {
+							ReadableContainer<ByteBuffer> readable = ((ReadableResource) resource).getReadable();
+							try {
+								licenseManager.addLicense(SecurityUtils.parseCertificate(IOUtils.toInputStream(readable)));
+							}
+							finally {
+								readable.close();
+							}
+						}
+						catch (Exception e) {
+							logger.warn("Ignoring file in licensing folder: " + resource.getName(), e);
+						}
+					}
+				}
+			}
+		}
+		else {
+			logger.warn("No license folder configured for this server");
+		}
+		
 		RoleHandler roleHandler = null;
 		if (getArgument("roles", null, args) != null) {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
@@ -87,6 +127,7 @@ public class Standalone {
 		repositoryInstance.enableMetrics(enableMetrics);
 		repositoryInstance.setName(serverName);
 		repositoryInstance.setGroup(groupName == null ? serverName : groupName);
+		repositoryInstance.setLicenseManager(licenseManager);
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
