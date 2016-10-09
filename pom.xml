@@ -5,44 +5,23 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>be.nabu.eai</groupId>
 	<artifactId>eai-server</artifactId>
-	<version>1.0-SNAPSHOT</version>
+	<version>${be.nabu.eai-eai-server-version}</version>
 	<name>eai-server</name>
+
+	<parent>
+		<groupId>be.nabu</groupId>
+		<artifactId>core</artifactId>
+		<version>1.0-SNAPSHOT</version>
+	</parent>
 
 	<build>
 		<plugins>
-			<plugin>
-				<groupId>org.apache.felix</groupId>
-				<artifactId>maven-bundle-plugin</artifactId>
-				<version>2.3.7</version>
-				<extensions>true</extensions>
-			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
 				<configuration>
 					<source>1.8</source>
 					<target>1.8</target>
-				</configuration>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-jarsigner-plugin</artifactId>
-				<version>1.4</version>
-				<executions>
-					<execution>
-						<id>sign</id>
-						<goals>
-							<goal>sign</goal>
-							<goal>verify</goal>
-						</goals>
-					</execution>
-				</executions>
-				<configuration>
-					<keystore>${sign.keystore}</keystore>
-					<alias>${sign.alias}</alias>
-					<storepass>${sign.storepass}</storepass>
-					<keypass>${sign.keypass}</keypass>
-					<tsa>${sign.tsa}</tsa>
 				</configuration>
 			</plugin>
 		</plugins>
@@ -61,27 +40,22 @@
 		<dependency>
 			<groupId>be.nabu.libs.http</groupId>
 			<artifactId>http-server-rest</artifactId>
-			<version>1.1-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>be.nabu.eai</groupId>
 			<artifactId>eai-repository</artifactId>
-			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>be.nabu.libs.services</groupId>
 			<artifactId>services-cache</artifactId>
-			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>be.nabu.libs.resources</groupId>
 			<artifactId>resources-snapshot</artifactId>
-			<version>1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>be.nabu.utils</groupId>
 			<artifactId>utils-aspects</artifactId>
-			<version>1.0-SNAPSHOT</version>
 		</dependency>
 	</dependencies>
 </project>
