@@ -1,6 +1,0 @@
-# Release the server itself
-maven.project.release("server", "be.nabu.eai.server.Standalone")
-
-# Release the maven server as well
-maven.project.release("maven", "be.nabu.eai.server.MavenServer")
-

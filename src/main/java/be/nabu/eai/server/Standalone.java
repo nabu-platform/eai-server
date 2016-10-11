@@ -57,7 +57,11 @@ public class Standalone {
 		int port = new Integer(getArgument("port", "5555", args));
 		int listenerPoolSize = new Integer(getArgument("listenerPoolSize", "20", args));
 
-		URI maven = new URI(URIUtils.encodeURI(getMandatoryArgument("maven", args)));
+		String modulesUri = getArgument("modules", getArgument("maven", null, args), args);
+		if (modulesUri == null) {
+			throw new IllegalArgumentException("Could not find modules folder");
+		}
+		URI maven = new URI(URIUtils.encodeURI(modulesUri));
 		ResourceContainer<?> mavenRoot = (ResourceContainer<?>) ResourceFactory.getInstance().resolve(maven, null);
 		if (mavenRoot == null) {
 			throw new IOException("The directory for the maven repository does not exist: " + maven);
