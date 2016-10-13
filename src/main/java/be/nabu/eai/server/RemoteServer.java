@@ -25,9 +25,12 @@ import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
 import be.nabu.libs.services.api.ServiceRunner;
+import be.nabu.libs.types.SimpleTypeWrapperFactory;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.base.SimpleElementImpl;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
+import be.nabu.libs.types.structure.Structure;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.ContentPart;
 import be.nabu.utils.mime.impl.FormatException;
@@ -202,7 +205,17 @@ public class RemoteServer implements ServiceRunner {
 				else {
 					XMLBinding resultBinding = new XMLBinding(service.getServiceInterface().getOutputDefinition(), charset);
 					resultBinding.setAllowSuperTypes(true);
-					result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+					try {
+						result = resultBinding.unmarshal(IOUtils.toInputStream(((ContentPart) response.getContent()).getReadable()), new Window[0]);
+					}
+					catch (Exception e) {
+						// if we can't parse the content, show the original XML atm
+						Structure structure = new Structure();
+						structure.setName("response");
+						structure.add(new SimpleElementImpl<String>("content", SimpleTypeWrapperFactory.getInstance().getWrapper().wrap(String.class), structure));
+						result = structure.newInstance();
+						result.set("content", new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8"));
+					}
 				}
 			}
 		}
