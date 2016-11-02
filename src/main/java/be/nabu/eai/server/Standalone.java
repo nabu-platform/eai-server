@@ -119,6 +119,9 @@ public class Standalone {
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
 		boolean historizeGauges = new Boolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
+		long historizationInterval = Long.parseLong(getArgument("historizationInterval", "5000", args));
+		int historySize = Integer.parseInt(getArgument("historySize", "1000", args));
+		
 		String authenticationService = getArgument("authentication", null, args);
 		String roleService = getArgument("role", null, args);
 		String permissionService = getArgument("permission", null, args);
@@ -134,6 +137,8 @@ public class Standalone {
 		repositoryInstance.setName(serverName);
 		repositoryInstance.setGroup(groupName == null ? serverName : groupName);
 		repositoryInstance.setLicenseManager(licenseManager);
+		repositoryInstance.setHistorizationInterval(historizationInterval);
+		repositoryInstance.setHistorySize(historySize);
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
