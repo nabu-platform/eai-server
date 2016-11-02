@@ -117,6 +117,7 @@ public class Standalone {
 		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "false", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
+		boolean historizeGauges = new Boolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
 		String authenticationService = getArgument("authentication", null, args);
 		String roleService = getArgument("role", null, args);
@@ -128,6 +129,7 @@ public class Standalone {
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
+		repositoryInstance.setHistorizeGauges(historizeGauges);
 		repositoryInstance.enableMetrics(enableMetrics);
 		repositoryInstance.setName(serverName);
 		repositoryInstance.setGroup(groupName == null ? serverName : groupName);
