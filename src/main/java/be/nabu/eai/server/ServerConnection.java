@@ -13,7 +13,7 @@ import javax.net.ssl.SSLContext;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.client.DefaultHTTPClient;
 import be.nabu.libs.http.client.SPIAuthenticationHandler;
-import be.nabu.libs.http.client.connections.PooledConnectionHandler;
+import be.nabu.libs.http.client.connections.PlainConnectionHandler;
 import be.nabu.libs.http.core.CustomCookieStore;
 
 public class ServerConnection {
@@ -25,6 +25,7 @@ public class ServerConnection {
 	private SSLContext context;
 	private Principal principal;
 	private String name;
+	private int socketTimeout = 60*1000*10, connectionTimeout = 60*1000;
 	
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port) {
 		this.context = context;
@@ -44,12 +45,7 @@ public class ServerConnection {
 	
 	public String getName() {
 		if (name == null) {
-			try {
-				name = getRemote().getName();
-			}
-			catch (Exception e) {
-				throw new RuntimeException(e);
-			}
+			name = getRemote().getName();
 		}
 		return name;
 	}
@@ -66,7 +62,7 @@ public class ServerConnection {
 	public HTTPClient getClient() {
 		if (client == null) {
 			synchronized(this) {
-				client = new DefaultHTTPClient(new PooledConnectionHandler(context, 5), new SPIAuthenticationHandler(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), false);
+				client = new DefaultHTTPClient(new PlainConnectionHandler(context, connectionTimeout, socketTimeout), new SPIAuthenticationHandler(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), false);
 			}
 		}
 		return client;
@@ -100,6 +96,22 @@ public class ServerConnection {
 
 	public Principal getPrincipal() {
 		return principal;
+	}
+
+	public int getSocketTimeout() {
+		return socketTimeout;
+	}
+
+	public void setSocketTimeout(int socketTimeout) {
+		this.socketTimeout = socketTimeout;
+	}
+
+	public int getConnectionTimeout() {
+		return connectionTimeout;
+	}
+
+	public void setConnectionTimeout(int connectionTimeout) {
+		this.connectionTimeout = connectionTimeout;
 	}
 	
 }

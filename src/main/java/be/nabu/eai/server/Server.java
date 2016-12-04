@@ -60,17 +60,17 @@ import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.NamedServiceRunner;
 import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
-import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 import be.nabu.utils.aspects.AspectUtils;
 
-public class Server implements ServiceRunner {
+public class Server implements NamedServiceRunner {
 	
 	public static final String SERVICE_THREAD_POOL = "be.nabu.eai.server.serviceThreadPoolSize";
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
@@ -81,6 +81,7 @@ public class Server implements ServiceRunner {
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 	private boolean anonymousIsRoot;
 	private boolean enableSnapshots;
+	private int port;
 
 	private RoleHandler roleHandler;
 	
@@ -103,6 +104,13 @@ public class Server implements ServiceRunner {
 		initialize();
 	}
 	
+	public int getPort() {
+		return port;
+	}
+	public void setPort(int port) {
+		this.port = port;
+	}
+
 	public boolean enableSecurity(HTTPServer server, String authenticationService, String roleHandlerService) {
 		if (authenticationService != null) {
 			Artifact resolve = repository.resolve(authenticationService);
@@ -438,9 +446,11 @@ public class Server implements ServiceRunner {
 					}
 				}
 			}
+			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true);
 		}
 		catch (Exception e) {
 			logger.error("Error while starting " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
+			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true, EAIRepositoryUtils.toValidation(e));
 		}
 	}
 	
@@ -495,9 +505,11 @@ public class Server implements ServiceRunner {
 					}
 				}
 			}
+			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true);
 		}
 		catch (Exception e) {
 			logger.error("Error while restarting " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
+			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true, EAIRepositoryUtils.toValidation(e));
 		}
 	}
 	
@@ -519,9 +531,11 @@ public class Server implements ServiceRunner {
 					}
 				}
 			}
+			EAIRepositoryUtils.message(repository, artifact.getId(), "stop", true);
 		}
 		catch (Exception e) {
 			logger.error("Error while stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
+			EAIRepositoryUtils.message(repository, artifact.getId(), "stop", true, EAIRepositoryUtils.toValidation(e));
 		}
 	}
 
@@ -716,6 +730,7 @@ public class Server implements ServiceRunner {
 		this.anonymousIsRoot = anonymousIsRoot;
 	}
 
+	@Override
 	public String getName() {
 		return repository.getName();
 	}

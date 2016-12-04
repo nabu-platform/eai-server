@@ -151,6 +151,7 @@ public class Standalone {
 			repositoryInstance.setUpdateMavenSnapshots(updateMavenSnapshots);
 		}
 		server.setAnonymousIsRoot(anonymousIsRoot);
+		server.setPort(port);
 		server.start();
 
 		if (roleService != null) {
@@ -177,6 +178,7 @@ public class Standalone {
 			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 			if (authenticationService != null) {
 				if (!server.enableSecurity(http, authenticationService, roleService)) {
+					logger.error("Could not enable security, the http server will not be started");
 					return;
 				}
 			}

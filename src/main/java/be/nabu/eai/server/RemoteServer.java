@@ -8,6 +8,8 @@ import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.security.Principal;
 import java.text.ParseException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Future;
 
 import be.nabu.libs.http.api.HTTPRequest;
@@ -20,11 +22,11 @@ import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.NamedServiceRunner;
 import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
-import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.types.SimpleTypeWrapperFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.base.SimpleElementImpl;
@@ -38,13 +40,14 @@ import be.nabu.utils.mime.impl.MimeHeader;
 import be.nabu.utils.mime.impl.MimeUtils;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
 
-public class RemoteServer implements ServiceRunner {
+public class RemoteServer implements NamedServiceRunner {
 	
 	private Charset charset;
 	private HTTPClient client;
 	private URI endpoint;
 	private Principal principal;
 	private ClientAuthenticationHandler authenticationHandler;
+	private Map<String, String> settings = new HashMap<String, String>();
 
 	public RemoteServer(HTTPClient client, URI endpoint, Principal principal, Charset charset) {
 		this.client = client;
@@ -82,8 +85,14 @@ public class RemoteServer implements ServiceRunner {
 		return result;
 	}
 	
-	public String getName() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
-		return URIUtils.encodeURI(getSetting("name"));
+	@Override
+	public String getName() {
+		try {
+			return URIUtils.encodeURI(getSetting("name"));
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 	
 	public static boolean isOk(int code) {
@@ -139,15 +148,22 @@ public class RemoteServer implements ServiceRunner {
 	}
 	
 	private String getSetting(String name) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
-		URI target = URIUtils.getChild(endpoint, "/settings/" + name);
-		HTTPResponse response = request(HTTPUtils.get(target));
-		if (!isOk(response.getCode())) {
-			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		if (!settings.containsKey(name)) {
+			synchronized(settings) {
+				if (!settings.containsKey(name)) {
+					URI target = URIUtils.getChild(endpoint, "/settings/" + name);
+					HTTPResponse response = request(HTTPUtils.get(target));
+					if (!isOk(response.getCode())) {
+						throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+					}
+					if (!(response.getContent() instanceof ContentPart)) {
+						throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
+					}
+					settings.put(name, new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8"));
+				}
+			}
 		}
-		if (!(response.getContent() instanceof ContentPart)) {
-			throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
-		}
-		return new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8");
+		return settings.get(name);
 	}
 	
 	private HTTPResponse request(HTTPRequest request) throws IOException, FormatException, ParseException {
