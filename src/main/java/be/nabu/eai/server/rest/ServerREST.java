@@ -192,4 +192,10 @@ public class ServerREST {
 		server.restoreRepository(id.replace('.', '/'));
 		repository.reload(id);
 	}
+	
+	@GET
+	@Path("/settings/version")
+	public String getVersion() {
+		return "Binary Beetle: 2.1-SNAPSHOT";
+	}
 }

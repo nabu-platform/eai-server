@@ -21,6 +21,7 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.LoggerContext;
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.MavenRepository;
@@ -31,6 +32,7 @@ import be.nabu.eai.repository.events.NodeEvent;
 import be.nabu.eai.repository.events.NodeEvent.State;
 import be.nabu.eai.repository.events.RepositoryEvent;
 import be.nabu.eai.repository.events.RepositoryEvent.RepositoryState;
+import be.nabu.eai.repository.logger.NabuLogAppender;
 import be.nabu.eai.repository.util.CombinedAuthenticator;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
@@ -109,6 +111,30 @@ public class Server implements NamedServiceRunner {
 	}
 	public void setPort(int port) {
 		this.port = port;
+	}
+	
+	public boolean enableLogger(String loggerService) {
+		if (loggerService != null) {
+			Artifact resolve = repository.resolve(loggerService);
+			if (resolve == null) {
+				logger.error("Can not find logger service, disabling logger");
+				return false;
+			}
+			
+			LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+			NabuLogAppender appender = new NabuLogAppender(getRepository(), (DefinedService) resolve);
+			appender.setContext(loggerContext);
+			appender.setName("Nabu Logger");
+//			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+			Logger logger = LoggerFactory.getLogger("be.nabu");
+			((ch.qos.logback.classic.Logger) logger).setLevel(ch.qos.logback.classic.Level.ERROR);
+			((ch.qos.logback.classic.Logger) logger).setAdditive(true);
+			((ch.qos.logback.classic.Logger) logger).addAppender(appender);
+			appender.start();
+			System.out.println("ADDED APPENDER " + appender + " using " + loggerService + " to " + Logger.ROOT_LOGGER_NAME);
+			return true;
+		}
+		return false;
 	}
 
 	public boolean enableSecurity(HTTPServer server, String authenticationService, String roleHandlerService) {

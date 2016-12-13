@@ -173,6 +173,11 @@ public class Standalone {
 				repositoryInstance.setPermissionHandler(POJOUtils.newProxy(PermissionHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
 			}
 		}
+		
+		String loggerService = getArgument("logger", null, args);
+		if (loggerService != null) {
+			server.enableLogger(loggerService);
+		}
 
 		if (enableREST || enableMaven || enableRepository) {
 			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());

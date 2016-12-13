@@ -25,7 +25,7 @@ public class ServerConnection {
 	private SSLContext context;
 	private Principal principal;
 	private String name;
-	private int socketTimeout = 60*1000*10, connectionTimeout = 60*1000;
+	private int socketTimeout = 60*1000*15, connectionTimeout = 60*1000;
 	
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port) {
 		this.context = context;
