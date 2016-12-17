@@ -56,6 +56,15 @@ public class RemoteServer implements NamedServiceRunner {
 		this.charset = charset;
 	}
 	
+	public Map<String, URI> getAliases() throws IOException, FormatException, ParseException, URISyntaxException {
+		Map<String, URI> aliases = new HashMap<String, URI>();
+		for (String alias : getSetting("aliases").split("[\\s]*,[\\\\s]*")) {
+			URI value = new URI("remote://" + endpoint.getAuthority() + "/alias/" + alias);
+			aliases.put(alias, value);
+		}
+		return aliases;
+	}
+	
 	public URI getRepositoryRoot() throws IOException, FormatException, ParseException, URISyntaxException {
 		String repository = URIUtils.encodeURI(getSetting("repository"));
 		URI uri = new URI(repository);
@@ -63,7 +72,7 @@ public class RemoteServer implements NamedServiceRunner {
 		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
 			uri = new URI(repository.replace("remote:", "remote://" + endpoint.getAuthority()));
 		}
-		System.out.println("REPOSITORY: " + uri);
+		System.out.println("Repository: " + uri);
 		return uri;
 	}
 	
@@ -74,7 +83,7 @@ public class RemoteServer implements NamedServiceRunner {
 		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
 			uri = new URI(maven.replace("remote:", "remote://" + endpoint.getAuthority()));
 		}
-		System.out.println("MAVEN: " + uri);
+		System.out.println("Modules: " + uri);
 		return uri;
 	}
 	

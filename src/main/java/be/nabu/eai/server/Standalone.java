@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Map;
 import java.util.Properties;
 import java.io.BufferedInputStream;
 
@@ -24,6 +25,7 @@ import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.URIUtils;
+import be.nabu.libs.resources.alias.AliasResourceResolver;
 import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.ResourceContainer;
@@ -193,6 +195,13 @@ public class Standalone {
 			if (enableRepository) {
 				server.enableRepository(http);
 				server.setForceRemoteRepository(forceRemoteRepository);
+			}
+			Map<String, URI> aliases = AliasResourceResolver.getAliases();
+			for (String alias : aliases.keySet()) {
+				boolean enableAlias = new Boolean(getArgument("enableAlias." + alias, "false", args));
+				if (enableAlias) {
+					server.enableAlias(http, alias, aliases.get(alias));
+				}
 			}
 			if (enableMaven) {
 				server.enableMaven(http);

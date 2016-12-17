@@ -149,6 +149,23 @@ public class ServerREST {
 	}
 	
 	@GET
+	@Path("/settings/aliases") 
+	public String getAliases() {
+		StringBuilder builder = new StringBuilder();
+		boolean first = true;
+		for (String alias : server.getAliases()) {
+			if (first) {
+				first = false;
+			}
+			else {
+				builder.append(",");
+			}
+			builder.append(alias);
+		}
+		return builder.toString().isEmpty() ? null : builder.toString();
+	}
+	
+	@GET
 	@Path("/settings/repository")
 	public URI getRepository(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
 		// we send back the "original" repository the server connected to if:

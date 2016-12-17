@@ -44,9 +44,12 @@ import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.api.EventHandler;
+import be.nabu.libs.events.api.EventSubscription;
 import be.nabu.libs.http.api.HTTPRequest;
+import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.server.BasicAuthenticationHandler;
+import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
@@ -87,6 +90,8 @@ public class Server implements NamedServiceRunner {
 
 	private RoleHandler roleHandler;
 	
+	private List<String> aliases = new ArrayList<String>();
+	
 	/**
 	 * This is set to true while the repository is loading
 	 * This allows us to queue actions (in the delayedArtifacts) to be done after the repository is done loading
@@ -125,13 +130,14 @@ public class Server implements NamedServiceRunner {
 			NabuLogAppender appender = new NabuLogAppender(getRepository(), (DefinedService) resolve);
 			appender.setContext(loggerContext);
 			appender.setName("Nabu Logger");
-//			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
-			Logger logger = LoggerFactory.getLogger("be.nabu");
-			((ch.qos.logback.classic.Logger) logger).setLevel(ch.qos.logback.classic.Level.ERROR);
-			((ch.qos.logback.classic.Logger) logger).setAdditive(true);
+			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+//			Logger logger = LoggerFactory.getLogger("be.nabu");
+			// don't set it to error, this should be configured, the service can still drop all the non-error logs
+//			((ch.qos.logback.classic.Logger) logger).setLevel(ch.qos.logback.classic.Level.ERROR);
+//			((ch.qos.logback.classic.Logger) logger).setAdditive(true);
 			((ch.qos.logback.classic.Logger) logger).addAppender(appender);
 			appender.start();
-			System.out.println("ADDED APPENDER " + appender + " using " + loggerService + " to " + Logger.ROOT_LOGGER_NAME);
+			logger.info("Registered central appender '" + loggerService + "' to " + Logger.ROOT_LOGGER_NAME);
 			return true;
 		}
 		return false;
@@ -382,6 +388,28 @@ public class Server implements NamedServiceRunner {
 		this.enabledRepositorySharing = true;
 	}
 	
+	public void enableAlias(HTTPServer server, String alias, URI uri) {
+		try {
+			logger.info("Exposing alias '" + alias + "': " + uri);
+			ResourceContainer<?> root = ResourceUtils.mkdir(uri, null);
+			if (root == null) {
+				logger.error("Can not enable alias: " + alias);
+			}
+			else {
+				EventSubscription<HTTPRequest, HTTPResponse> subscription = server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/alias/" + alias, ResourceREST.class, null, root));
+				subscription.filter(HTTPServerUtils.limitToPath("/alias/" + alias));
+				aliases.add(alias);
+			}
+		}
+		catch (IOException e) {
+			logger.error("Can not enable alias: " + alias, e);
+		}
+	}
+	
+	public List<String> getAliases() {
+		return aliases;
+	}
+
 	public void snapshotRepository(String path) throws IOException {
 		if (enableSnapshots) {
 			ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
