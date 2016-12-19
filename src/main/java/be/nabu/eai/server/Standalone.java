@@ -24,11 +24,13 @@ import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
+import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.alias.AliasResourceResolver;
 import be.nabu.libs.resources.api.ReadableResource;
 import be.nabu.libs.resources.api.Resource;
 import be.nabu.libs.resources.api.ResourceContainer;
+import be.nabu.libs.resources.file.FileDirectory;
 import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.pojo.POJOUtils;
@@ -107,6 +109,20 @@ public class Standalone {
 			logger.warn("No license folder configured for this server");
 		}
 		
+		ResourceContainer<?> deploymentRoot;
+		String deploymentFolder = getArgument("deployments", null, args);
+		if (deploymentFolder != null) {
+			URI deployments = new URI(URIUtils.encodeURI(deploymentFolder));
+			deploymentRoot = ResourceUtils.mkdir(deployments, null);
+		}
+		else {
+			File file = new File("deployments");
+			if (!file.exists()) {
+				file.mkdir();
+			}
+			deploymentRoot = new FileDirectory(null, file, false);
+		}
+		
 		RoleHandler roleHandler = null;
 		if (getArgument("roles", null, args) != null) {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
@@ -144,6 +160,7 @@ public class Standalone {
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
+		server.setDeployments(deploymentRoot);
 		server.setEnableSnapshots(enableSnapshots);
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);

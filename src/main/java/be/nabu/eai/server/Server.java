@@ -104,6 +104,8 @@ public class Server implements NamedServiceRunner {
 	private boolean enabledRepositorySharing, forceRemoteRepository;
 	private boolean isStarted;
 	private PasswordAuthenticator passwordAuthenticator;
+	private ResourceContainer<?> deployments;
+	private NabuLogAppender appender;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -111,6 +113,13 @@ public class Server implements NamedServiceRunner {
 		initialize();
 	}
 	
+	public ResourceContainer<?> getDeployments() {
+		return deployments;
+	}
+	public void setDeployments(ResourceContainer<?> deployments) {
+		this.deployments = deployments;
+	}
+
 	public int getPort() {
 		return port;
 	}
@@ -127,7 +136,7 @@ public class Server implements NamedServiceRunner {
 			}
 			
 			LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-			NabuLogAppender appender = new NabuLogAppender(getRepository(), (DefinedService) resolve);
+			appender = new NabuLogAppender(getRepository(), (DefinedService) resolve);
 			appender.setContext(loggerContext);
 			appender.setName("Nabu Logger");
 			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
