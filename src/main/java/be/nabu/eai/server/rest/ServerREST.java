@@ -213,6 +213,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Binary Beetle: 2.1";
+		return "Binary Beetle: 2.2";
 	}
 }
