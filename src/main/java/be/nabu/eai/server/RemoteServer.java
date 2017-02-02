@@ -34,6 +34,8 @@ import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.libs.types.structure.Structure;
 import be.nabu.utils.io.IOUtils;
+import be.nabu.utils.io.api.ByteBuffer;
+import be.nabu.utils.io.api.ReadableContainer;
 import be.nabu.utils.mime.api.ContentPart;
 import be.nabu.utils.mime.impl.FormatException;
 import be.nabu.utils.mime.impl.MimeHeader;
@@ -168,7 +170,18 @@ public class RemoteServer implements NamedServiceRunner {
 					if (!(response.getContent() instanceof ContentPart)) {
 						throw new ParseException("Expecting a content part as answer, received: " + response.getContent(), 0);
 					}
-					settings.put(name, new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8"));
+					ReadableContainer<ByteBuffer> readable = ((ContentPart) response.getContent()).getReadable();
+					if (readable == null) {
+						settings.put(name, "");
+					}
+					else {
+						try {
+							settings.put(name, new String(IOUtils.toBytes(readable), "UTF-8"));
+						}
+						finally {
+							readable.close();
+						}
+					}
 				}
 			}
 		}

@@ -7,14 +7,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.security.Principal;
+import java.util.concurrent.Executors;
 
 import javax.net.ssl.SSLContext;
 
+import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.client.HTTPClient;
 import be.nabu.libs.http.client.DefaultHTTPClient;
 import be.nabu.libs.http.client.SPIAuthenticationHandler;
 import be.nabu.libs.http.client.connections.PlainConnectionHandler;
+import be.nabu.libs.http.client.nio.NIOHTTPClientImpl;
 import be.nabu.libs.http.core.CustomCookieStore;
+import be.nabu.libs.http.server.nio.MemoryMessageDataProvider;
 
 public class ServerConnection {
 	
@@ -62,7 +66,12 @@ public class ServerConnection {
 	public HTTPClient getClient() {
 		if (client == null) {
 			synchronized(this) {
-				client = new DefaultHTTPClient(new PlainConnectionHandler(context, connectionTimeout, socketTimeout), new SPIAuthenticationHandler(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), false);
+				if (Boolean.parseBoolean(System.getProperty("http.experimental.client", "false"))) {
+					client = new NIOHTTPClientImpl(context, 5, 2, 20, new EventDispatcherImpl(), new MemoryMessageDataProvider(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), Executors.defaultThreadFactory());
+				}
+				else {
+					client = new DefaultHTTPClient(new PlainConnectionHandler(context, connectionTimeout, socketTimeout), new SPIAuthenticationHandler(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), false);
+				}
 			}
 		}
 		return client;

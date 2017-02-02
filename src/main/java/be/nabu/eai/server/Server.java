@@ -5,6 +5,7 @@ import java.net.URI;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -37,6 +38,7 @@ import be.nabu.eai.repository.util.CombinedAuthenticator;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.api.ServerListener;
+import be.nabu.eai.server.api.ServerListener.Phase;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
@@ -45,11 +47,13 @@ import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
+import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.server.BasicAuthenticationHandler;
 import be.nabu.libs.http.server.HTTPServerUtils;
+import be.nabu.libs.http.server.nio.RoutingMessageDataProvider;
 import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
@@ -86,7 +90,7 @@ public class Server implements NamedServiceRunner {
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
 	private boolean anonymousIsRoot;
 	private boolean enableSnapshots;
-	private int port;
+	private int port, listenerPoolSize;
 
 	private RoleHandler roleHandler;
 	
@@ -106,6 +110,8 @@ public class Server implements NamedServiceRunner {
 	private PasswordAuthenticator passwordAuthenticator;
 	private ResourceContainer<?> deployments;
 	private NabuLogAppender appender;
+	private List<ServerListener> serverListeners;
+	private HTTPServer httpServer;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -152,7 +158,7 @@ public class Server implements NamedServiceRunner {
 		return false;
 	}
 
-	public boolean enableSecurity(HTTPServer server, String authenticationService, String roleHandlerService) {
+	public boolean enableSecurity(String authenticationService, String roleHandlerService) {
 		if (authenticationService != null) {
 			Artifact resolve = repository.resolve(authenticationService);
 			if (resolve == null) {
@@ -160,22 +166,14 @@ public class Server implements NamedServiceRunner {
 				return false;
 			}
 			passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
-			server.getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null)));
+			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null)));
 		}
 		return true;
 	}
 
-	public void enableREST(HTTPServer server) {
+	public void enableREST() {
 		// make sure we intercept invoke commands
-		server.getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
-		for (Class<ServerListener> serverListener : EAIRepositoryUtils.getImplementationsFor(getRepository().getClassLoader(), ServerListener.class)) {
-			try {
-				serverListener.newInstance().listen(this, server);
-			}
-			catch (Exception e) {
-				logger.error("Could not initialize server listener: " + serverListener, e);
-			}
-		}
+		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
 	}
 	
 	/**
@@ -276,6 +274,7 @@ public class Server implements NamedServiceRunner {
 		});
 		
 		repository.getEventDispatcher().subscribe(RepositoryEvent.class, new EventHandler<RepositoryEvent, Void>() {
+
 			@Override
 			public Void handle(RepositoryEvent event) {
 				if (event.getState() == RepositoryState.LOAD || event.getState() == RepositoryState.RELOAD) {
@@ -288,6 +287,27 @@ public class Server implements NamedServiceRunner {
 							// TODO: find any modules that want to hook into the server after load (not reload?) so we can for instance register a global security handler etc
 							// TODO: want to do this _before_ starting everything up? once the http servers are up, they can start firing requests, if this happens before for example security handlers are set...set are screwed
 							logger.info("Repository loaded in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s, processing artifacts");
+							
+							// get all the server listeners
+							serverListeners = new ArrayList<ServerListener>();
+							
+							for (Class<ServerListener> clazz : EAIRepositoryUtils.getImplementationsFor(getRepository().getClassLoader(), ServerListener.class)) {
+								try {
+									serverListeners.add(clazz.newInstance());
+								}
+								catch (Exception e) {
+									logger.error("Could not initialize server listener: " + clazz, e);
+								}
+							}
+							
+							Collections.sort(serverListeners, new ServerListener.ServerListenerComparator());
+							
+							// all the artifacts are loaded but not yet started
+							for (ServerListener serverListener : serverListeners) {
+								if (serverListener.getPhase() == Phase.REPOSITORY_LOADED) {
+									serverListener.listen(Server.this, getHTTPServer());
+								}
+							}
 						}
 						isRepositoryLoading = false;
 						// it is possible to get multiple events for one item (e.g. if an unload of a new item triggers an initial load only to be reloaded afterwards)
@@ -386,18 +406,18 @@ public class Server implements NamedServiceRunner {
 		}
 	}
 	
-	public void enableRepository(HTTPServer server) throws IOException {
+	public void enableRepository() throws IOException {
 		ResourceContainer<?> repositoryRoot = ((ResourceRepository) repository).getRoot().getContainer();
 		if (AspectUtils.hasAspects(repositoryRoot)) {
 			List<Object> aspects = AspectUtils.aspects(repositoryRoot);
 			repositoryRoot = (ResourceContainer<?>) aspects.get(0);
 		}
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repositoryRoot));
-		server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repositoryRoot));
+		getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
 		this.enabledRepositorySharing = true;
 	}
 	
-	public void enableAlias(HTTPServer server, String alias, URI uri) {
+	public void enableAlias(String alias, URI uri) {
 		try {
 			logger.info("Exposing alias '" + alias + "': " + uri);
 			ResourceContainer<?> root = ResourceUtils.mkdir(uri, null);
@@ -405,7 +425,7 @@ public class Server implements NamedServiceRunner {
 				logger.error("Can not enable alias: " + alias);
 			}
 			else {
-				EventSubscription<HTTPRequest, HTTPResponse> subscription = server.getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/alias/" + alias, ResourceREST.class, null, root));
+				EventSubscription<HTTPRequest, HTTPResponse> subscription = getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/alias/" + alias, ResourceREST.class, null, root));
 				subscription.filter(HTTPServerUtils.limitToPath("/alias/" + alias));
 				aliases.add(alias);
 			}
@@ -462,7 +482,7 @@ public class Server implements NamedServiceRunner {
 		}
 	}
 	
-	public void enableMaven(HTTPServer server) {
+	public void enableMaven() {
 		repository.getEventDispatcher().subscribe(DeleteResourceRepositoryEvent.class, new EventHandler<DeleteResourceRepositoryEvent, Void>() {
 			@Override
 			public Void handle(DeleteResourceRepositoryEvent event) {
@@ -490,7 +510,7 @@ public class Server implements NamedServiceRunner {
 			}
 		});
 		// no support for non-root calls atm!
-		server.getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
+		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
 	private void start(StartableArtifact artifact, boolean recursive) {
@@ -669,6 +689,13 @@ public class Server implements NamedServiceRunner {
 		startupTime = new Date();
 		Thread.currentThread().setContextClassLoader(repository.getClassLoader());
 		repository.start();
+		
+		// everything should be up and running
+		for (ServerListener serverListener : serverListeners) {
+			if (serverListener.getPhase() == Phase.ARTIFACTS_STARTED) {
+				serverListener.listen(Server.this, getHTTPServer());
+			}
+		}
 	}
 	
 	public URI getRepositoryRoot() {
@@ -808,5 +835,29 @@ public class Server implements NamedServiceRunner {
 
 	public void setEnableSnapshots(boolean enableSnapshots) {
 		this.enableSnapshots = enableSnapshots;
+	}
+
+	public int getListenerPoolSize() {
+		return listenerPoolSize;
+	}
+
+	public void setListenerPoolSize(int listenerPoolSize) {
+		this.listenerPoolSize = listenerPoolSize;
+	}
+
+	public HTTPServer getHTTPServer() {
+		if (httpServer == null) {
+			synchronized(this) {
+				if (httpServer == null) {
+					httpServer = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
+					httpServer.setMessageDataProvider(new RoutingMessageDataProvider());
+				}
+			}
+		}
+		return httpServer;
+	}
+	
+	boolean hasHTTPServer() {
+		return httpServer != null;
 	}
 }

@@ -1,5 +1,6 @@
 package be.nabu.eai.server;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -8,7 +9,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Properties;
-import java.io.BufferedInputStream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +20,6 @@ import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.api.PermissionHandler;
 import be.nabu.libs.authentication.api.RoleHandler;
-import be.nabu.libs.events.impl.EventDispatcherImpl;
-import be.nabu.libs.http.api.server.HTTPServer;
-import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.URIUtils;
@@ -170,6 +167,7 @@ public class Standalone {
 			repositoryInstance.setUpdateMavenSnapshots(updateMavenSnapshots);
 		}
 		server.setAnonymousIsRoot(anonymousIsRoot);
+		server.setListenerPoolSize(listenerPoolSize);
 		server.setPort(port);
 		server.start();
 
@@ -199,31 +197,32 @@ public class Standalone {
 		}
 
 		if (enableREST || enableMaven || enableRepository) {
-			HTTPServer http = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 			if (authenticationService != null) {
-				if (!server.enableSecurity(http, authenticationService, roleService)) {
+				if (!server.enableSecurity(authenticationService, roleService)) {
 					logger.error("Could not enable security, the http server will not be started");
 					return;
 				}
 			}
 			if (enableREST) {
-				server.enableREST(http);
+				server.enableREST();
 			}
 			if (enableRepository) {
-				server.enableRepository(http);
+				server.enableRepository();
 				server.setForceRemoteRepository(forceRemoteRepository);
 			}
 			Map<String, URI> aliases = AliasResourceResolver.getAliases();
 			for (String alias : aliases.keySet()) {
 				boolean enableAlias = new Boolean(getArgument("enableAlias." + alias, "false", args));
 				if (enableAlias) {
-					server.enableAlias(http, alias, aliases.get(alias));
+					server.enableAlias(alias, aliases.get(alias));
 				}
 			}
 			if (enableMaven) {
-				server.enableMaven(http);
+				server.enableMaven();
 			}
-			http.start();
+		}
+		if (server.hasHTTPServer()) {
+			server.getHTTPServer().start();
 		}
 	}
 	
