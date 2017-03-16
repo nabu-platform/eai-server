@@ -510,7 +510,7 @@ public class Server implements NamedServiceRunner {
 			}
 		});
 		// no support for non-root calls atm!
-		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
+//		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
 	private void start(StartableArtifact artifact, boolean recursive) {
