@@ -101,7 +101,8 @@ public class ServerREST {
 		
 		final Header header = MimeUtils.getHeader("Run-As", headers);
 		if (header != null) {
-			principal = new SystemPrincipal(header.getValue());
+			final Header realmHeader = MimeUtils.getHeader("Run-As-Realm", headers);
+			principal = new SystemPrincipal(header.getValue(), realmHeader == null ? null : realmHeader.getValue());
 		}
 		
 		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
@@ -213,6 +214,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Binary Beetle: 2.15";
+		return "Binary Beetle: 2.16-SNAPSHOT";
 	}
 }

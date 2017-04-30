@@ -224,6 +224,7 @@ public class RemoteServer implements NamedServiceRunner {
 			);
 			if (executionContext.getSecurityContext().getToken() != null) {
 				request.getContent().setHeader(new MimeHeader("Run-As", executionContext.getSecurityContext().getToken().getName()));
+				request.getContent().setHeader(new MimeHeader("Run-As-Realm", executionContext.getSecurityContext().getToken().getRealm()));
 			}
 			HTTPResponse response = request(request);
 			
