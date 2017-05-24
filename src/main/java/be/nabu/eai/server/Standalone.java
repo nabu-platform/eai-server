@@ -74,7 +74,7 @@ public class Standalone {
 			throw new IOException("The directory for the repository does not exist: " + repository);
 		}
 		
-		LicenseManager licenseManager = null;
+		LicenseManager licenseManager = new LicenseManagerImpl();
 		String licenseFolder = getArgument("licenses", null, args);
 		if (licenseFolder != null) {
 			URI licenses = new URI(URIUtils.encodeURI(licenseFolder));
@@ -83,7 +83,6 @@ public class Standalone {
 				throw new RuntimeException("The configured license folder is invalid: " + licenseFolder);
 			}
 			else {
-				licenseManager = new LicenseManagerImpl();
 				for (Resource resource : licenseRoot) {
 					if (resource instanceof ReadableResource) {
 						try {
@@ -101,9 +100,6 @@ public class Standalone {
 					}
 				}
 			}
-		}
-		else {
-			logger.warn("No license folder configured for this server");
 		}
 		
 		ResourceContainer<?> deploymentRoot;

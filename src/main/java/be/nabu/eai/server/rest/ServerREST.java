@@ -214,6 +214,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Binary Beetle: 2.16-SNAPSHOT";
+		return "Coding Camel: 3.0";
 	}
 }
