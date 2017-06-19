@@ -851,6 +851,9 @@ public class Server implements NamedServiceRunner {
 				if (httpServer == null) {
 					httpServer = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
 					httpServer.setMessageDataProvider(new RoutingMessageDataProvider());
+					if (Boolean.parseBoolean(System.getProperty("server.encode", "true"))) {
+						httpServer.getDispatcher().subscribe(HTTPResponse.class, HTTPServerUtils.ensureContentEncoding());
+					}
 				}
 			}
 		}
