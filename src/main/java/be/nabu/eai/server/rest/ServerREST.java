@@ -214,6 +214,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Coding Camel: 3.1";
+		return "Coding Camel: 3.2";
 	}
 }

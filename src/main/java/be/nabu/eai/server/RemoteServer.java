@@ -258,17 +258,11 @@ public class RemoteServer implements NamedServiceRunner {
 				}
 			}
 		}
-		catch (FormatException e) {
-			exception = new ServiceException(e);
-		}
-		catch (ParseException e) {
-			exception = new ServiceException(e);
-		}
-		catch (IOException e) {
-			exception = new ServiceException(e);
-		}
 		catch (ServiceException e) {
 			exception = e;
+		}
+		catch (Exception e) {
+			exception = new ServiceException(e);
 		}
 		return new Server.ServiceResultFuture(new SimpleServiceResult(result, exception));
 	}
