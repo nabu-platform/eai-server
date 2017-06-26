@@ -413,7 +413,9 @@ public class Server implements NamedServiceRunner {
 			repositoryRoot = (ResourceContainer<?>) aspects.get(0);
 		}
 		getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/repository", ResourceREST.class, null, repositoryRoot));
-		getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		if (repository.getMavenRoot() != null) {
+			getHTTPServer().getDispatcher().subscribe(HTTPRequest.class, new RESTHandler("/modules", ResourceREST.class, null, (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository.getMavenRoot(), null)));
+		}
 		this.enabledRepositorySharing = true;
 	}
 	

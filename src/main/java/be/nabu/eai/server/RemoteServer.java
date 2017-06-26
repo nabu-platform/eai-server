@@ -80,13 +80,16 @@ public class RemoteServer implements NamedServiceRunner {
 	
 	public URI getMavenRoot() throws IOException, FormatException, ParseException, URISyntaxException {
 		String maven = URIUtils.encodeURI(getSetting("maven"));
-		URI uri = new URI(maven);
-		// if we have no host, use the one from the endpoint
-		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
-			uri = new URI(maven.replace("remote:", "remote://" + endpoint.getAuthority()));
+		if (maven != null && !maven.isEmpty()) {
+			URI uri = new URI(maven);
+			// if we have no host, use the one from the endpoint
+			if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
+				uri = new URI(maven.replace("remote:", "remote://" + endpoint.getAuthority()));
+			}
+			System.out.println("Modules: " + uri);
+			return uri;
 		}
-		System.out.println("Modules: " + uri);
-		return uri;
+		return null;
 	}
 	
 	public Boolean requiresAuthentication() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
@@ -99,7 +102,16 @@ public class RemoteServer implements NamedServiceRunner {
 	@Override
 	public String getName() {
 		try {
-			return URIUtils.encodeURI(getSetting("name"));
+			return getSetting("name");
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	public String getVersion() {
+		try {
+			return getSetting("version");
 		}
 		catch (Exception e) {
 			throw new RuntimeException(e);

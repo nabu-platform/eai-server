@@ -54,6 +54,10 @@ public class ServerConnection {
 		return name;
 	}
 	
+	public String getVersion() {
+		return getRemote().getVersion();
+	}
+	
 	public URI getRepositoryRoot() throws IOException {
 		try {
 			return getRemote().getRepositoryRoot();
