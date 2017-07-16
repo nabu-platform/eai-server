@@ -182,7 +182,10 @@ public class ServerREST {
 	@GET
 	@Path("/settings/maven")
 	public URI getMaven(@HeaderParam(value = ServerHeader.NAME_REMOTE_IS_LOCAL) String isLocal) throws URISyntaxException {
-		return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/modules") : server.getRepository().getMavenRoot();
+		if (server.getRepository().getMavenRoot() != null) {
+			return server.isEnabledRepositorySharing() && (!"true".equals(isLocal) || server.isForceRemoteRepository()) ? new URI("remote:/modules") : server.getRepository().getMavenRoot();
+		}
+		return null;
 	}
 	
 	@GET
@@ -214,6 +217,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Coding Camel: 3.3";
+		return "Coding Camel: 3.4-SNAPSHOT";
 	}
 }
