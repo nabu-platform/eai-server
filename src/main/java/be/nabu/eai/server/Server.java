@@ -22,7 +22,6 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import ch.qos.logback.classic.LoggerContext;
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.MavenRepository;
@@ -57,7 +56,6 @@ import be.nabu.libs.http.server.nio.RoutingMessageDataProvider;
 import be.nabu.libs.http.server.rest.RESTHandler;
 import be.nabu.libs.maven.CreateResourceRepositoryEvent;
 import be.nabu.libs.maven.DeleteResourceRepositoryEvent;
-import be.nabu.libs.maven.MavenListener;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.api.Resource;
@@ -66,7 +64,6 @@ import be.nabu.libs.resources.remote.server.ResourceREST;
 import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
-import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
 import be.nabu.libs.services.api.NamedServiceRunner;
@@ -78,6 +75,7 @@ import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 import be.nabu.utils.aspects.AspectUtils;
+import ch.qos.logback.classic.LoggerContext;
 
 public class Server implements NamedServiceRunner {
 	
@@ -638,8 +636,7 @@ public class Server implements NamedServiceRunner {
 		// in the future could actually run this async in a thread pool but for now it is assumed that all originating systems have their own thread pool
 		// for example the messaging system runs in its own thread pool, as does the http server etc
 		// if we were going for a centralized thread pool those systems should use the central one as well but then might start to interfere with one another
-		runnable.run();
-		return new ServiceResultFuture(new SimpleServiceResult(runnable.getOutput(), runnable.getException()));
+		return new ServiceResultFuture(runnable.call());
 	}
 	
 	static class ServiceResultFuture implements Future<ServiceResult> {
