@@ -28,6 +28,7 @@ import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.Server;
 import be.nabu.libs.authentication.api.Token;
+import be.nabu.libs.authentication.impl.ImpersonateToken;
 import be.nabu.libs.http.core.ServerHeader;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ServiceException;
@@ -102,7 +103,7 @@ public class ServerREST {
 		final Header header = MimeUtils.getHeader("Run-As", headers);
 		if (header != null) {
 			final Header realmHeader = MimeUtils.getHeader("Run-As-Realm", headers);
-			principal = new SystemPrincipal(header.getValue(), realmHeader == null ? null : realmHeader.getValue());
+			principal = new ImpersonateToken(null, realmHeader == null ? null : realmHeader.getValue(), header.getValue());
 		}
 		
 		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
@@ -217,6 +218,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Coding Camel: 3.5";
+		return "Digital Dragon: 4.0";
 	}
 }

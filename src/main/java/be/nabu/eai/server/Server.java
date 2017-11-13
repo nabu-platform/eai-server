@@ -50,6 +50,7 @@ import be.nabu.libs.events.impl.EventDispatcherImpl;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.server.HTTPServer;
+import be.nabu.libs.http.api.server.RealmHandler;
 import be.nabu.libs.http.server.BasicAuthenticationHandler;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.http.server.nio.RoutingMessageDataProvider;
@@ -156,7 +157,7 @@ public class Server implements NamedServiceRunner {
 		return false;
 	}
 
-	public boolean enableSecurity(String authenticationService, String roleHandlerService) {
+	public boolean enableSecurity(String authenticationService) {
 		if (authenticationService != null) {
 			Artifact resolve = repository.resolve(authenticationService);
 			if (resolve == null) {
@@ -164,7 +165,12 @@ public class Server implements NamedServiceRunner {
 				return false;
 			}
 			passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
-			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null)));
+			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null), new RealmHandler() {
+				@Override
+				public String getRealm(HTTPRequest request) {
+					return getRepository().getGroup();
+				}
+			}));
 		}
 		return true;
 	}

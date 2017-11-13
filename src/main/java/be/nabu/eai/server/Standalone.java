@@ -150,6 +150,26 @@ public class Standalone {
 		repositoryInstance.setLicenseManager(licenseManager);
 		repositoryInstance.setHistorizationInterval(historizationInterval);
 		repositoryInstance.setHistorySize(historySize);
+
+		if (roleService != null) {
+			Artifact resolve = repositoryInstance.resolve(roleService);
+			if (resolve == null) {
+				logger.error("Invalid role service: " + roleService);
+			}
+			else {
+				roleHandler = POJOUtils.newProxy(RoleHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve);
+				repositoryInstance.setRoleHandler(roleHandler);
+			}
+		}
+		if (permissionService != null) {
+			Artifact resolve = repositoryInstance.resolve(permissionService);
+			if (resolve == null) {
+				logger.error("Invalid permission service: " + permissionService);
+			}
+			else {
+				repositoryInstance.setPermissionHandler(POJOUtils.newProxy(PermissionHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
+			}
+		}
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
@@ -167,26 +187,6 @@ public class Standalone {
 		server.setPort(port);
 		server.start();
 
-		if (roleService != null) {
-			Artifact resolve = repositoryInstance.resolve(roleService);
-			if (resolve == null) {
-				logger.error("Invalid role service: " + roleService);
-			}
-			else {
-				repositoryInstance.setRoleHandler(POJOUtils.newProxy(RoleHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
-			}
-		}
-		
-		if (permissionService != null) {
-			Artifact resolve = repositoryInstance.resolve(permissionService);
-			if (resolve == null) {
-				logger.error("Invalid permission service: " + permissionService);
-			}
-			else {
-				repositoryInstance.setPermissionHandler(POJOUtils.newProxy(PermissionHandler.class, repositoryInstance, SystemPrincipal.ROOT, (DefinedService) resolve));
-			}
-		}
-		
 		String loggerService = getArgument("logger", null, args);
 		if (loggerService != null) {
 			server.enableLogger(loggerService);
@@ -194,7 +194,7 @@ public class Standalone {
 
 		if (enableREST || enableMaven || enableRepository) {
 			if (authenticationService != null) {
-				if (!server.enableSecurity(authenticationService, roleService)) {
+				if (!server.enableSecurity(authenticationService)) {
 					logger.error("Could not enable security, the http server will not be started");
 					return;
 				}
