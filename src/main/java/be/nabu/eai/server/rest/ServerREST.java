@@ -24,12 +24,17 @@ import javax.ws.rs.core.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import be.nabu.eai.repository.api.Entry;
 import be.nabu.eai.repository.api.Repository;
+import be.nabu.eai.repository.api.ResourceEntry;
+import be.nabu.eai.repository.resources.RepositoryEntry;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.Server;
 import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.authentication.impl.ImpersonateToken;
 import be.nabu.libs.http.core.ServerHeader;
+import be.nabu.libs.resources.api.ResourceContainer;
+import be.nabu.libs.resources.api.features.CacheableResource;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
@@ -63,18 +68,58 @@ public class ServerREST {
 	@Path("/reload")
 	@GET
 	public void reloadAll() {
+		if (repository.getRoot() instanceof RepositoryEntry) {
+			ResourceContainer<?> container = ((RepositoryEntry) repository.getRoot()).getContainer();
+			if (container instanceof CacheableResource) {
+				try {
+					((CacheableResource) container).resetCache();
+				}
+				catch (IOException e) {
+					// best effort
+				}
+			}
+		}
 		repository.reloadAll();
 	}
 
 	@Path("/reload/{id}")
 	@GET
 	public void reload(@PathParam("id") String id) {
+		reloadClosestParent(id);
 		repository.reload(id);
+	}
+
+	private void reloadClosestParent(String id) {
+		// we want to reload the resources of the closest parent that exists
+		// this allows us to pick up changes on the file system if there are any
+		String idToReset = id;
+		Entry entry = null;
+		while (entry == null) {
+			entry = repository.getEntry(idToReset);
+			if (entry == null && idToReset.contains(".")) {
+				idToReset = idToReset.replaceAll("\\.[^.]+$", "");
+			}
+			else {
+				break;
+			}
+		}
+		if (entry instanceof ResourceEntry) {
+			ResourceContainer<?> container = ((RepositoryEntry) entry).getContainer();
+			if (container instanceof CacheableResource) {
+				try {
+					((CacheableResource) container).resetCache();
+				}
+				catch (IOException e) {
+					// best effort
+				}
+			}
+		}
 	}
 	
 	@Path("/unload/{id}")
 	@GET
 	public void unload(@PathParam("id") String id) {
+		reloadClosestParent(id);
 		repository.unload(id);
 	}
 	
@@ -218,6 +263,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Digital Dragon: 4.0";
+		return "Digital Dragon: 4.1";
 	}
 }

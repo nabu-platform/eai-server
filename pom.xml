@@ -50,5 +50,18 @@
 			<groupId>be.nabu.utils</groupId>
 			<artifactId>utils-aspects</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.cluster</groupId>
+			<artifactId>cluster-api</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>be.nabu.libs.cluster</groupId>
+			<artifactId>cluster-hazelcast</artifactId>
+		</dependency>
+		<dependency>
+		    <groupId>com.hazelcast</groupId>
+		    <artifactId>hazelcast</artifactId>
+		    <version>3.9.1</version>
+		</dependency>
 	</dependencies>
 </project>

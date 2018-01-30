@@ -1,7 +1,11 @@
 package be.nabu.eai.server;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.Charset;
+import java.security.Principal;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -15,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -22,8 +27,11 @@ import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.hazelcast.core.HazelcastInstanceNotActiveException;
+
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
+import be.nabu.eai.repository.api.ClusteredServer;
 import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
@@ -42,8 +50,17 @@ import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
+import be.nabu.libs.artifacts.api.StartableArtifact.StartPhase;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
+import be.nabu.libs.authentication.api.Authenticator;
 import be.nabu.libs.authentication.api.RoleHandler;
+import be.nabu.libs.authentication.api.Token;
+import be.nabu.libs.authentication.api.principals.BasicPrincipal;
+import be.nabu.libs.authentication.impl.BasicPrincipalImpl;
+import be.nabu.libs.cluster.api.ClusterBlockingQueue;
+import be.nabu.libs.cluster.api.ClusterInstance;
+import be.nabu.libs.cluster.api.ClusterMessageListener;
+import be.nabu.libs.cluster.api.ClusterTopic;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
 import be.nabu.libs.events.impl.EventDispatcherImpl;
@@ -52,6 +69,7 @@ import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.server.HTTPServer;
 import be.nabu.libs.http.api.server.RealmHandler;
 import be.nabu.libs.http.server.BasicAuthenticationHandler;
+import be.nabu.libs.http.server.FixedRealmHandler;
 import be.nabu.libs.http.server.HTTPServerUtils;
 import be.nabu.libs.http.server.nio.RoutingMessageDataProvider;
 import be.nabu.libs.http.server.rest.RESTHandler;
@@ -65,6 +83,7 @@ import be.nabu.libs.resources.remote.server.ResourceREST;
 import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.ServiceRunnable;
 import be.nabu.libs.services.ServiceRuntime;
+import be.nabu.libs.services.api.ClusteredServiceRunner;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
 import be.nabu.libs.services.api.NamedServiceRunner;
@@ -72,13 +91,19 @@ import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRunnableObserver;
+import be.nabu.libs.services.api.ServiceRunner;
 import be.nabu.libs.services.pojo.POJOUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.binding.api.Window;
+import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.utils.aspects.AspectUtils;
+import ch.qos.logback.classic.AsyncAppender;
 import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.Appender;
 
-public class Server implements NamedServiceRunner {
+public class Server implements NamedServiceRunner, ClusteredServiceRunner, ClusteredServer {
 	
 	public static final String SERVICE_THREAD_POOL = "be.nabu.eai.server.serviceThreadPoolSize";
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
@@ -90,10 +115,14 @@ public class Server implements NamedServiceRunner {
 	private boolean anonymousIsRoot;
 	private boolean enableSnapshots;
 	private int port, listenerPoolSize;
+	
+	// always have a local instance for local locks etc
+	private ClusterInstance cluster;
 
 	private RoleHandler roleHandler;
 	
 	private List<String> aliases = new ArrayList<String>();
+	private boolean disableStartup = false;
 	
 	/**
 	 * This is set to true while the repository is loading
@@ -108,14 +137,84 @@ public class Server implements NamedServiceRunner {
 	private boolean isStarted;
 	private PasswordAuthenticator passwordAuthenticator;
 	private ResourceContainer<?> deployments;
-	private NabuLogAppender appender;
+	private Appender<ILoggingEvent> appender;
 	private List<ServerListener> serverListeners;
 	private HTTPServer httpServer;
+	private Thread queueExecutionThread;
+	private ExecutorService pool;
+	private CollaborationListener collaborationListener;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
 		this.repository = repository;
-		initialize();
+	}
+	
+	private void initializeListeners() {
+		ClusterInstance cluster = getCluster();
+		if (cluster != null) {
+			logger.info("Initializing cluster listeners");
+			final ClusterBlockingQueue<ServiceExecutionTask> queue = cluster.queue("server.execute");
+			queueExecutionThread = new Thread(new Runnable() {
+				public void run() {
+					while (true) {
+						try {
+							ServiceExecutionTask task = queue.take();
+							Server.this.run(task);
+						}
+						catch (HazelcastInstanceNotActiveException e) {
+							logger.warn("Hazelcast is down, exiting", e);
+							break;
+						}
+						catch (Exception e) {
+							logger.error("Could not execute task", e);
+						}
+					}
+				}
+			});
+			queueExecutionThread.start();
+			
+			ClusterTopic<ServiceExecutionTask> topic = cluster.topic("server.execute");
+			topic.subscribe(new ClusterMessageListener<ServiceExecutionTask>() {
+				@Override
+				public void onMessage(ServiceExecutionTask message) {
+					try {
+						run(message);
+					}
+					catch (Exception e) {
+						logger.error("Could not execute task", e);
+					}
+				}
+			});
+		}
+	}
+
+	private void run(ServiceExecutionTask task) throws IOException, ParseException {
+		DefinedService service = (DefinedService) repository.resolve(task.getServiceId());
+		if (service == null) {
+			throw new IllegalArgumentException("Could not find service: " + task.getServiceId());
+		}
+		ServiceRunner target = Server.this;
+		if (task.getTarget() != null) {
+			target = (ServiceRunner) repository.resolve(task.getTarget());
+		}
+		if (target == null) {
+			throw new IllegalArgumentException("Could not find target: " + task.getTarget());
+		}
+		
+		ComplexContent input = null;
+		if (task.getInput() != null) {
+			XMLBinding binding = new XMLBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
+			input = binding.unmarshal(new ByteArrayInputStream(task.getInput().getBytes(Charset.forName("UTF-8"))), new Window[0]);
+		}
+		runInPool(service, repository.newExecutionContext(SystemPrincipal.ROOT), input);
+	}
+	
+	public void runInPool(final Service service, final ExecutionContext context, final ComplexContent content) {
+		pool.submit(new Runnable() {
+			public void run() {
+				Server.this.run(service, context, content);
+			}
+		});
 	}
 	
 	public ResourceContainer<?> getDeployments() {
@@ -132,7 +231,7 @@ public class Server implements NamedServiceRunner {
 		this.port = port;
 	}
 	
-	public boolean enableLogger(String loggerService) {
+	public boolean enableLogger(String loggerService, boolean async, Map<String, String> properties) {
 		if (loggerService != null) {
 			Artifact resolve = repository.resolve(loggerService);
 			if (resolve == null) {
@@ -141,8 +240,17 @@ public class Server implements NamedServiceRunner {
 			}
 			
 			LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-			appender = new NabuLogAppender(getRepository(), (DefinedService) resolve);
-			appender.setContext(loggerContext);
+			NabuLogAppender nabuAppender = new NabuLogAppender(getRepository(), (DefinedService) resolve, properties);
+			nabuAppender.setContext(loggerContext);
+			if (async) {
+				appender = new AsyncAppender();
+				appender.setContext(loggerContext);
+				((AsyncAppender) appender).addAppender(nabuAppender);
+				nabuAppender.start();
+			}
+			else {
+				appender = nabuAppender;
+			}
 			appender.setName("Nabu Logger");
 			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
 //			Logger logger = LoggerFactory.getLogger("be.nabu");
@@ -165,12 +273,26 @@ public class Server implements NamedServiceRunner {
 				return false;
 			}
 			passwordAuthenticator = POJOUtils.newProxy(PasswordAuthenticator.class, (DefinedService) resolve, getRepository(), SystemPrincipal.ROOT);
-			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null), new RealmHandler() {
+			BasicAuthenticationHandler basicAuthenticationHandler = new BasicAuthenticationHandler(new CombinedAuthenticator(passwordAuthenticator, null), new RealmHandler() {
 				@Override
 				public String getRealm(HTTPRequest request) {
 					return getRepository().getGroup();
 				}
-			}));
+			});
+			basicAuthenticationHandler.setRequired(true);
+			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, basicAuthenticationHandler);
+		}
+		else {
+			BasicAuthenticationHandler basicAuthenticationHandler = new BasicAuthenticationHandler(new Authenticator() {
+				@Override
+				public Token authenticate(String realm, Principal...credentials) {
+					return credentials.length > 0 && credentials[0] instanceof BasicPrincipal
+						? new BasicPrincipalImpl(credentials[0].getName(), ((BasicPrincipal) credentials[0]).getPassword(), realm)
+						: null;
+				}
+			}, new FixedRealmHandler(getRepository().getGroup()));
+			basicAuthenticationHandler.setRequired(true);
+			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, basicAuthenticationHandler);
 		}
 		return true;
 	}
@@ -178,6 +300,9 @@ public class Server implements NamedServiceRunner {
 	public void enableREST() {
 		// make sure we intercept invoke commands
 		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new RESTHandler("/", ServerREST.class, roleHandler, repository, this));
+		
+		collaborationListener = new CollaborationListener(this);
+		collaborationListener.start();
 	}
 	
 	/**
@@ -334,10 +459,10 @@ public class Server implements NamedServiceRunner {
 								if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
 									run(delayedNodeEvent);
 								}
-								else if (delayedNodeEvent.getState() == State.RELOAD && RestartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+								else if (delayedNodeEvent.getState() == State.RELOAD && RestartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && !disableStartup) {
 									restart(delayedNodeEvent, false);
 								}
-								else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+								else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && !disableStartup) {
 									// don't recurse, on start we should be starting all the nodes
 									start(delayedNodeEvent, false);
 								}
@@ -352,6 +477,7 @@ public class Server implements NamedServiceRunner {
 						else {
 							logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
 							isStarted = true;
+							initializeListeners();
 						}
 					}
 					else {
@@ -710,6 +836,7 @@ public class Server implements NamedServiceRunner {
 	/**
 	 * TODO: Only checks direct references atm, not recursive ones
 	 */
+	@SuppressWarnings("unused")
 	private void orderNodes(final Repository repository, List<NodeEvent> events) {
 		Comparator<NodeEvent> comparator = new Comparator<NodeEvent>() {
 			@Override
@@ -754,12 +881,25 @@ public class Server implements NamedServiceRunner {
 					// if i is before j but requires it in references, try to switch 
 					boolean iDependsOnJ = allReferences.get(events.get(i).getId()).contains(events.get(j).getId());
 					boolean jDependsOnI = allReferences.get(events.get(j).getId()).contains(events.get(i).getId());
+					
+					StartPhase iPhase = StartPhase.NORMAL, jPhase = StartPhase.NORMAL;
+					// check for stages for startup
+					if (!iDependsOnJ && !jDependsOnI) {
+						Artifact iResolve = repository.resolve(events.get(i).getId());
+						Artifact jResolve = repository.resolve(events.get(j).getId());
+						
+						if (iResolve instanceof StartableArtifact && jResolve instanceof StartableArtifact) {
+							iPhase = ((StartableArtifact) iResolve).getPhase();
+							jPhase = ((StartableArtifact) jResolve).getPhase();
+						}
+					}
+					
 					if (jDependsOnI && iDependsOnJ) {
 						// to have each warning only once, not once in each direction
 						int comparison = events.get(i).getId().compareTo(events.get(j).getId());
 						warnings.add("Found circular reference between: " + events.get(comparison < 0 ? i : j) + " and " + events.get(comparison < 0 ? j : i));
 					}
-					else if ((iDependsOnJ && i < j) || (jDependsOnI && j < i)) {
+					else if ((iDependsOnJ && i < j) || (jDependsOnI && j < i) || (i < j && iPhase.ordinal() > jPhase.ordinal()) || (i > j && jPhase.ordinal() > iPhase.ordinal())) {
 						NodeEvent nodeEvent = events.get(i);
 						events.set(i, events.get(j));
 						events.set(j, nodeEvent);
@@ -868,4 +1008,63 @@ public class Server implements NamedServiceRunner {
 	boolean hasHTTPServer() {
 		return httpServer != null;
 	}
+
+	@Override
+	public ClusterInstance getCluster() {
+		return cluster;
+	}
+	public void setCluster(ClusterInstance cluster) {
+		this.cluster = cluster;
+	}
+
+	@Override
+	public void runAnywhere(Service service, ExecutionContext context, ComplexContent input, String target) {
+		ServiceExecutionTask task = toTask(service, input, target);
+		try {
+			cluster.queue("server.execute").put(task);
+		}
+		catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private ServiceExecutionTask toTask(Service service, ComplexContent input, String target) {
+		ServiceExecutionTask task = new ServiceExecutionTask();
+		task.setServiceId(((DefinedService) service).getId());
+		if (input != null) {
+			XMLBinding binding = new XMLBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			try {
+				binding.marshal(output, input);
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+			task.setInput(new String(output.toByteArray(), Charset.forName("UTF-8")));
+		}
+		task.setTarget(target);
+		return task;
+	}
+
+	@Override
+	public void runEverywhere(Service service, ExecutionContext context, ComplexContent input, String target) {
+		ServiceExecutionTask task = toTask(service, input, target);
+		cluster.topic("server.execute").publish(task);
+	}
+
+	public ExecutorService getPool() {
+		return pool;
+	}
+	public void setPool(ExecutorService pool) {
+		this.pool = pool;
+	}
+
+	public boolean isDisableStartup() {
+		return disableStartup;
+	}
+
+	public void setDisableStartup(boolean disableStartup) {
+		this.disableStartup = disableStartup;
+	}
+
 }

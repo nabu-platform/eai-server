@@ -7,11 +7,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
 
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.LicenseManager;
@@ -20,6 +26,8 @@ import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.api.PermissionHandler;
 import be.nabu.libs.authentication.api.RoleHandler;
+import be.nabu.libs.cluster.hazelcast.HazelcastClusterInstance;
+import be.nabu.libs.cluster.local.LocalInstance;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.URIUtils;
@@ -121,6 +129,7 @@ public class Standalone {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
 		}
 
+		boolean cluster = new Boolean(getArgument("cluster", "false", args));
 		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", "false", args));
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
@@ -130,8 +139,11 @@ public class Standalone {
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
 		boolean historizeGauges = new Boolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
+		boolean startup = new Boolean(getArgument("startup", "true", args));
 		long historizationInterval = Long.parseLong(getArgument("historizationInterval", "5000", args));
 		int historySize = Integer.parseInt(getArgument("historySize", "1000", args));
+		
+		int pool = Integer.parseInt(getArgument("pool", "" + Runtime.getRuntime().availableProcessors(), args));
 		
 		String authenticationService = getArgument("authentication", null, args);
 		String roleService = getArgument("role", null, args);
@@ -173,10 +185,26 @@ public class Standalone {
 		
 		// create the server
 		Server server = new Server(roleHandler, repositoryInstance);
+		if (!startup) {
+			server.setDisableStartup(true);
+		}
 		server.setDeployments(deploymentRoot);
 		server.setEnableSnapshots(enableSnapshots);
+		server.setPool(Executors.newFixedThreadPool(pool));
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
+		
+		if (cluster) {
+			Config config = new Config();
+			config.setClassLoader(repositoryInstance.getClassLoader());
+	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
+			server.setCluster(new HazelcastClusterInstance(instance));
+		}
+		else {
+			server.setCluster(new LocalInstance());
+		}
+			
+		server.initialize();
 		
 		if (localMavenServer != null) {
 			repositoryInstance.setLocalMavenServer(new URI(URIUtils.encodeURI(localMavenServer)));
@@ -188,16 +216,15 @@ public class Standalone {
 		server.start();
 
 		String loggerService = getArgument("logger", null, args);
+		String loggerAsync = getArgument("loggerAsync", null, args);
 		if (loggerService != null) {
-			server.enableLogger(loggerService);
+			server.enableLogger(loggerService, loggerAsync == null || !loggerAsync.equalsIgnoreCase("false"), getChildren("logger", args));
 		}
 
 		if (enableREST || enableMaven || enableRepository) {
-			if (authenticationService != null) {
-				if (!server.enableSecurity(authenticationService)) {
-					logger.error("Could not enable security, the http server will not be started");
-					return;
-				}
+			if (!server.enableSecurity(authenticationService)) {
+				logger.error("Could not enable security, the http server will not be started");
+				return;
 			}
 			if (enableREST) {
 				server.enableREST();
@@ -229,7 +256,26 @@ public class Standalone {
 				return value.isEmpty() ? null : value;
 			}
 		}
-		return System.getProperty(Standalone.class.getName() + "." + name, defaultValue);
+		return System.getProperty(Standalone.class.getName() + "." + name, System.getProperty(name, defaultValue));
+	}
+	
+	public static Map<String, String> getChildren(String name, String...args) {
+		Map<String, String> properties = new HashMap<String, String>();
+		for (String argument : args) {
+			if (argument.startsWith(name + ".")) {
+				int index = argument.indexOf('=');
+				if (index > 0) {
+					properties.put(argument.substring(name.length() + 1, index), argument.substring(index + 1));
+				}
+			}
+		}
+		for (Object key : System.getProperties().keySet()) {
+			String keyName = key.toString();
+			if (keyName.startsWith(name + ".")) {
+				properties.put(keyName.substring(name.length() + 1), System.getProperty(keyName));
+			}
+		}
+		return properties;
 	}
 	
 	public static String getMandatoryArgument(String name, String...args) {

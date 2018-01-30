@@ -16,6 +16,7 @@ import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.ClientAuthenticationHandler;
 import be.nabu.libs.http.api.client.HTTPClient;
+import be.nabu.libs.http.client.nio.SPIAuthenticationHandler;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
 import be.nabu.libs.http.core.HTTPUtils;
 import be.nabu.libs.resources.URIUtils;
@@ -56,6 +57,9 @@ public class RemoteServer implements NamedServiceRunner {
 		this.endpoint = endpoint;
 		this.principal = principal;
 		this.charset = charset;
+		if (this.principal != null) {
+			this.authenticationHandler = new SPIAuthenticationHandler();
+		}
 	}
 	
 	public Map<String, URI> getAliases() throws IOException, FormatException, ParseException, URISyntaxException {

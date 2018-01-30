@@ -70,7 +70,7 @@ public class ServerConnection {
 	public HTTPClient getClient() {
 		if (client == null) {
 			synchronized(this) {
-				if (Boolean.parseBoolean(System.getProperty("http.experimental.client", "false"))) {
+				if (Boolean.parseBoolean(System.getProperty("http.experimental.client", "true"))) {
 					client = new NIOHTTPClientImpl(context, 5, 2, 20, new EventDispatcherImpl(), new MemoryMessageDataProvider(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), Executors.defaultThreadFactory());
 				}
 				else {
