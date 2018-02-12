@@ -263,6 +263,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Digital Dragon: 4.1";
+		return "Digital Dragon: 4.2";
 	}
 }

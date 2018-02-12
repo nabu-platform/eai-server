@@ -251,7 +251,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			else {
 				appender = nabuAppender;
 			}
-			appender.setName("Nabu Logger");
+			appender.setName("Nabu Custom Logger");
 			Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
 //			Logger logger = LoggerFactory.getLogger("be.nabu");
 			// don't set it to error, this should be configured, the service can still drop all the non-error logs
@@ -291,7 +291,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 						: null;
 				}
 			}, new FixedRealmHandler(getRepository().getGroup()));
-			basicAuthenticationHandler.setRequired(true);
+			basicAuthenticationHandler.setRequired(false);
 			getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, basicAuthenticationHandler);
 		}
 		return true;
@@ -303,8 +303,26 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		
 		collaborationListener = new CollaborationListener(this);
 		collaborationListener.start();
+		
+		// set the server logger
+		LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+		CollaborationAppender appender = new CollaborationAppender(this);
+		appender.setContext(loggerContext);
+		AsyncAppender asyncAppender = new AsyncAppender();
+		asyncAppender.setContext(loggerContext);
+		((AsyncAppender) asyncAppender).addAppender(appender);
+		appender.start();
+		asyncAppender.setName("Nabu Collaboration Logger");
+		Logger logger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+		((ch.qos.logback.classic.Logger) logger).addAppender(asyncAppender);
+		asyncAppender.start();
+		logger.info("Registered collaboration appender to " + Logger.ROOT_LOGGER_NAME);
 	}
 	
+	public CollaborationListener getCollaborationListener() {
+		return collaborationListener;
+	}
+
 	/**
 	 * The node inside the event _can_ be outdated in some reload events, this method gets the latest version of the node
 	 * It may need to be cleaned up at some point but in some cases (notably unload) you actually need access to whatever node the event was triggered upon (to shut it down properly) instead of the "latest" version

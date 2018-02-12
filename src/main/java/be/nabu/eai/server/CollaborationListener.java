@@ -13,6 +13,10 @@ import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.XmlRootElement;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import be.nabu.eai.repository.Notification;
 import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
@@ -28,6 +32,7 @@ import be.nabu.libs.http.server.websockets.WebSocketHandshakeHandler;
 import be.nabu.libs.http.server.websockets.WebSocketUtils;
 import be.nabu.libs.http.server.websockets.api.WebSocketMessage;
 import be.nabu.libs.http.server.websockets.api.WebSocketRequest;
+import be.nabu.libs.http.server.websockets.impl.WebSocketRequestParserFactory;
 import be.nabu.libs.nio.PipelineUtils;
 import be.nabu.libs.nio.api.Pipeline;
 import be.nabu.libs.nio.api.StandardizedMessagePipeline;
@@ -38,6 +43,7 @@ import be.nabu.utils.mime.api.Header;
 public class CollaborationListener {
 	
 	private Server server;
+	private Logger logger = LoggerFactory.getLogger(getClass());
 
 	public CollaborationListener(Server server) {
 		this.server = server;
@@ -88,12 +94,31 @@ public class CollaborationListener {
 			@Override
 			public Void handle(ConnectionEvent event) {
 				if (ConnectionState.CLOSED.equals(event.getState()) || ConnectionState.UPGRADED.equals(event.getState())) {
-					Token token = WebSocketUtils.getToken((StandardizedMessagePipeline<WebSocketRequest, WebSocketMessage>) event.getPipeline());
-					CollaborationMessage content = ConnectionState.UPGRADED.equals(event.getState())
-						? new CollaborationMessage(CollaborationMessageType.JOIN, "Connected")
-						: new CollaborationMessage(CollaborationMessageType.LEAVE, "Disconnected");
-					content.setAlias(token == null ? null : token.getName());
-					broadcast(WebSocketUtils.newMessage(marshal(content)), Arrays.asList(event.getPipeline()));
+					WebSocketRequestParserFactory parserFactory = WebSocketUtils.getParserFactory(event.getPipeline());
+					if (parserFactory != null && "/collaborate".equals(parserFactory.getPath())) {
+						Token token = WebSocketUtils.getToken((StandardizedMessagePipeline<WebSocketRequest, WebSocketMessage>) event.getPipeline());
+						CollaborationMessage content = ConnectionState.UPGRADED.equals(event.getState())
+							? new CollaborationMessage(CollaborationMessageType.JOIN, "Connected")
+							: new CollaborationMessage(CollaborationMessageType.LEAVE, "Disconnected");
+						content.setAlias(token == null ? null : token.getName());
+						broadcast(WebSocketUtils.newMessage(marshal(content)), Arrays.asList(event.getPipeline()));
+					}
+				}
+				return null;
+			}
+		});
+		
+		server.getRepository().getEventDispatcher().subscribe(Notification.class, new EventHandler<Notification, Void>() {
+			@Override
+			public Void handle(Notification event) {
+				try {
+					// note that notification properties are not serialized as they are transient (because they are an object)
+					// send the notifications to everyone who connected
+					WebSocketMessage newMessage = WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.NOTIFICATION, marshal(event))));
+					broadcast(newMessage, null);
+				}
+				catch (Exception e) {
+					logger.error("Can not marshal notification", e);
 				}
 				return null;
 			}
@@ -116,11 +141,9 @@ public class CollaborationListener {
 		List<User> users = new ArrayList<User>();
 		for (StandardizedMessagePipeline<WebSocketRequest, WebSocketMessage> pipeline : pipelines) {
 			Token token = WebSocketUtils.getToken(pipeline);
-			if (token != null) {
-				User user = new User();
-				user.setAlias(token.getName());
-				users.add(user);
-			}
+			User user = new User();
+			user.setAlias(token == null ? "$anonymous" : token.getName());
+			users.add(user);
 		}
 		Collections.sort(users);
 		UserList userList = new UserList();
@@ -152,7 +175,7 @@ public class CollaborationListener {
 	}
 
 	public enum CollaborationMessageType {
-		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE
+		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE, LOG, LOCKS, NOTIFICATION
 	}
 	
 	@XmlRootElement
