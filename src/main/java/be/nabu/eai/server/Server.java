@@ -1085,4 +1085,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		this.disableStartup = disableStartup;
 	}
 
+	public Date getStartupTime() {
+		return startupTime;
+	}
+
 }

@@ -2,6 +2,8 @@ package be.nabu.eai.server;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -268,8 +270,13 @@ public class RemoteServer implements NamedServiceRunner {
 						Structure structure = new Structure();
 						structure.setName("response");
 						structure.add(new SimpleElementImpl<String>("content", SimpleTypeWrapperFactory.getInstance().getWrapper().wrap(String.class), structure));
+						structure.add(new SimpleElementImpl<String>("exception", SimpleTypeWrapperFactory.getInstance().getWrapper().wrap(String.class), structure));
 						result = structure.newInstance();
 						result.set("content", new String(IOUtils.toBytes(((ContentPart) response.getContent()).getReadable()), "UTF-8"));
+						StringWriter writer = new StringWriter();
+						PrintWriter printer = new PrintWriter(writer);
+						e.printStackTrace(printer);
+						result.set("exception", writer.toString());
 					}
 				}
 			}

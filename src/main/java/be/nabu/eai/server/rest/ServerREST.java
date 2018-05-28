@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.text.ParseException;
+import java.util.Date;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -241,6 +242,12 @@ public class ServerREST {
 	}
 	
 	@GET
+	@Path("/settings/uptime")
+	public Date getUptime() {
+		return server.getStartupTime();
+	}
+	
+	@GET
 	@Path("/snapshot/{id}")
 	public void snapshotRepository(@PathParam("id") String id) throws IOException {
 		server.snapshotRepository(id.replace('.', '/'));
@@ -263,6 +270,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Digital Dragon: 4.3";
+		return "Digital Dragon: 4.4-SNAPSHOT";
 	}
 }
