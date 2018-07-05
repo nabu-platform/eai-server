@@ -22,6 +22,7 @@ import be.nabu.libs.http.client.nio.SPIAuthenticationHandler;
 import be.nabu.libs.http.core.DefaultHTTPRequest;
 import be.nabu.libs.http.core.HTTPUtils;
 import be.nabu.libs.resources.URIUtils;
+import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
@@ -223,6 +224,8 @@ public class RemoteServer implements NamedServiceRunner {
 		if (!(service instanceof DefinedService)) {
 			throw new IllegalArgumentException("The service has to be a defined one for remote execution");
 		}
+		Map<String, Object> globalContext = ServiceRuntime.getGlobalContext();
+		String serviceContext = globalContext == null ? null : (String) globalContext.get("service.context");
 		URI target = URIUtils.getChild(endpoint, "/invoke/" + ((DefinedService) service).getId());
 		XMLBinding xmlBinding = new XMLBinding(input.getType(), charset);
 		ServiceException exception = null;
@@ -243,6 +246,9 @@ public class RemoteServer implements NamedServiceRunner {
 			if (executionContext.getSecurityContext().getToken() != null) {
 				request.getContent().setHeader(new MimeHeader("Run-As", executionContext.getSecurityContext().getToken().getName()));
 				request.getContent().setHeader(new MimeHeader("Run-As-Realm", executionContext.getSecurityContext().getToken().getRealm()));
+			}
+			if (serviceContext != null) {
+				request.getContent().setHeader(new MimeHeader("Service-Context", serviceContext));
 			}
 			HTTPResponse response = request(request);
 			

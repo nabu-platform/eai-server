@@ -10,6 +10,7 @@ import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.text.ParseException;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -36,6 +37,7 @@ import be.nabu.libs.authentication.impl.ImpersonateToken;
 import be.nabu.libs.http.core.ServerHeader;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.api.features.CacheableResource;
+import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
@@ -152,47 +154,58 @@ public class ServerREST {
 			principal = new ImpersonateToken(null, realmHeader == null ? null : realmHeader.getValue(), header.getValue());
 		}
 		
-		Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
+		final Header serviceContextHeader = MimeUtils.getHeader("Service-Context", headers);
 		try {
-			ServiceResult serviceResult = future.get();
-			if (serviceResult.getException() != null) {
-				logger.error("Could not run service: " + serviceId, serviceResult.getException());
-				StringWriter writer = new StringWriter();
-				PrintWriter printer = new PrintWriter(writer);
-				serviceResult.getException().printStackTrace(printer);
-				printer.flush();
-				byte [] bytes = writer.toString().getBytes();
-				return new PlainMimeContentPart(null, IOUtils.wrap(bytes, true),
-					new MimeHeader("Content-Length", Integer.valueOf(bytes.length).toString()),
-					new MimeHeader("Content-Type", "text/plain")
-				);
+			if (serviceContextHeader != null) {
+				// set it globally
+				ServiceRuntime.setGlobalContext(new HashMap<String, Object>());
+				ServiceRuntime.getGlobalContext().put("service.context", serviceContextHeader.getValue());
 			}
-			ComplexContent output = serviceResult.getOutput();
-			// this is possible in some cases (e.g. void java methods)
-			if (output == null) {
-				return new PlainMimeEmptyPart(null, 
-					new MimeHeader("Content-Length", "0")
-				);
+			Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
+			try {
+				ServiceResult serviceResult = future.get();
+				if (serviceResult.getException() != null) {
+					logger.error("Could not run service: " + serviceId, serviceResult.getException());
+					StringWriter writer = new StringWriter();
+					PrintWriter printer = new PrintWriter(writer);
+					serviceResult.getException().printStackTrace(printer);
+					printer.flush();
+					byte [] bytes = writer.toString().getBytes();
+					return new PlainMimeContentPart(null, IOUtils.wrap(bytes, true),
+						new MimeHeader("Content-Length", Integer.valueOf(bytes.length).toString()),
+						new MimeHeader("Content-Type", "text/plain")
+					);
+				}
+				ComplexContent output = serviceResult.getOutput();
+				// this is possible in some cases (e.g. void java methods)
+				if (output == null) {
+					return new PlainMimeEmptyPart(null, 
+						new MimeHeader("Content-Length", "0")
+					);
+				}
+				else {
+					MarshallableBinding marshallable = MediaType.APPLICATION_JSON.equals(contentType) 
+						? new JSONBinding(output.getType())
+						: new XMLBinding(output.getType(), Charset.forName("UTF-8"));
+					ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+					marshallable.marshal(bytes, output);
+					byte[] byteArray = bytes.toByteArray();
+					logger.trace("Response: {}", new String(byteArray));
+					return new PlainMimeContentPart(null, IOUtils.wrap(byteArray, true), 
+						new MimeHeader("Content-Length", Integer.valueOf(byteArray.length).toString()),
+						new MimeHeader("Content-Type", marshallable instanceof JSONBinding ? MediaType.APPLICATION_JSON : MediaType.APPLICATION_XML)
+					);
+				}
 			}
-			else {
-				MarshallableBinding marshallable = MediaType.APPLICATION_JSON.equals(contentType) 
-					? new JSONBinding(output.getType())
-					: new XMLBinding(output.getType(), Charset.forName("UTF-8"));
-				ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-				marshallable.marshal(bytes, output);
-				byte[] byteArray = bytes.toByteArray();
-				logger.trace("Response: {}", new String(byteArray));
-				return new PlainMimeContentPart(null, IOUtils.wrap(byteArray, true), 
-					new MimeHeader("Content-Length", Integer.valueOf(byteArray.length).toString()),
-					new MimeHeader("Content-Type", marshallable instanceof JSONBinding ? MediaType.APPLICATION_JSON : MediaType.APPLICATION_XML)
-				);
+			catch (InterruptedException e) {
+				throw new RuntimeException(e);
+			}
+			catch (ExecutionException e) {
+				throw new RuntimeException(e);
 			}
 		}
-		catch (InterruptedException e) {
-			throw new RuntimeException(e);
-		}
-		catch (ExecutionException e) {
-			throw new RuntimeException(e);
+		finally {
+			ServiceRuntime.setGlobalContext(null);
 		}
 	}
 	
@@ -270,6 +283,6 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Digital Dragon: 4.4-SNAPSHOT";
+		return "Encrypted Eagle: 5.0";
 	}
 }

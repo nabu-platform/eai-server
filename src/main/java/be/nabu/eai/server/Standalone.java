@@ -3,6 +3,7 @@ package be.nabu.eai.server;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.XmlConfigBuilder;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 
@@ -129,7 +131,7 @@ public class Standalone {
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
 		}
 
-		boolean cluster = new Boolean(getArgument("cluster", "false", args));
+		String cluster = getArgument("cluster", "false", args);
 		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", "false", args));
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
@@ -194,8 +196,27 @@ public class Standalone {
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
 		
-		if (cluster) {
-			Config config = new Config();
+		// if it is not set to false, check if it is either true (use default settings) or points to a file
+		if (cluster != null && !cluster.equalsIgnoreCase("false")) {
+			Config config;
+			// just use the default configuration
+			if (cluster.equalsIgnoreCase("true")) {
+				config = new Config();
+			}
+			// load from file system
+			else {
+				Resource resolve = ResourceFactory.getInstance().resolve(new URI(URIUtils.encodeURI(cluster)), null);
+				if (resolve == null) {
+					throw new FileNotFoundException("Can not find hazelcast configuration: " + cluster);
+				}
+				ReadableContainer<ByteBuffer> readable = ((ReadableResource) resolve).getReadable();
+				try {
+					config = new XmlConfigBuilder(IOUtils.toInputStream(readable)).build();
+				}
+				finally {
+					readable.close();
+				}
+			}
 			config.setClassLoader(repositoryInstance.getClassLoader());
 	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
 			server.setCluster(new HazelcastClusterInstance(instance));

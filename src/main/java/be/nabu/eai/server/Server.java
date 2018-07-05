@@ -789,11 +789,11 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		return new ServiceResultFuture(runnable.call());
 	}
 	
-	static class ServiceResultFuture implements Future<ServiceResult> {
+	public static class ServiceResultFuture implements Future<ServiceResult> {
 		
 		private ServiceResult serviceResult;
 		
-		ServiceResultFuture(ServiceResult serviceResult) {
+		public ServiceResultFuture(ServiceResult serviceResult) {
 			this.serviceResult = serviceResult;
 		}
 		
