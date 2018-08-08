@@ -132,7 +132,14 @@ public class Standalone {
 		}
 
 		String cluster = getArgument("cluster", "false", args);
-		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", "false", args));
+		// if snapshots are disabled, deployments "can" go wrong because this happens:
+		// clean folders
+		// reload everything
+		// for some reason the server reports there is nothing (should still see the stuff in memory but doesn't)
+		// so nothing gets unloaded but everything does get loaded
+		// this means stuff like http servers etc fail on restart because the previous one is still running
+		// should definitely fix the deployment procedure as well but enabling snapshots in non-development environments is not a bad thing either
+		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", Boolean.toString(!EAIResourceRepository.isDevelopment()), args));
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
 		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
