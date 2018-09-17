@@ -51,6 +51,10 @@ public class Standalone {
 	private static Logger logger = LoggerFactory.getLogger(Standalone.class);
 	
 	public static void main(String...args) throws IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
+		// ask to stop
+		if (args.length > 0 && args[0].equalsIgnoreCase("stop")) {
+			System.exit(0);
+		}
 		String propertiesFileName = getArgument("properties", "server.properties", args);
 		File propertiesFile = new File(propertiesFileName);
 		if (propertiesFile.exists()) {

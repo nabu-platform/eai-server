@@ -156,7 +156,8 @@ public class ServerREST {
 		
 		final Header serviceContextHeader = MimeUtils.getHeader("Service-Context", headers);
 		try {
-			if (serviceContextHeader != null) {
+			// ignore empty values, likely a bad input from the developer
+			if (serviceContextHeader != null && serviceContextHeader.getValue() != null && !serviceContextHeader.getValue().trim().isEmpty()) {
 				// set it globally
 				ServiceRuntime.setGlobalContext(new HashMap<String, Object>());
 				ServiceRuntime.getGlobalContext().put("service.context", serviceContextHeader.getValue());
@@ -284,5 +285,11 @@ public class ServerREST {
 	@Path("/settings/version")
 	public String getVersion() {
 		return "Encrypted Eagle: 5.1-SNAPSHOT";
+	}
+	
+	@GET
+	@Path("/heartbeat")
+	public Date getHeartbeat() {
+		return new Date();
 	}
 }
