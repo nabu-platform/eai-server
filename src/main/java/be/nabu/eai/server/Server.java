@@ -835,6 +835,34 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 	
 	public void start() throws IOException {
+		Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+			public void run() {
+				logger.info("Shutting down server");
+				List<StoppableArtifact> artifacts = repository.getArtifacts(StoppableArtifact.class);
+				// we want to reverse sort them, if they had to start late, they have to be shut down first
+				artifacts.sort(new Comparator<StoppableArtifact>() {
+					@Override
+					public int compare(StoppableArtifact o1, StoppableArtifact o2) {
+						StartPhase phase1 = o1 instanceof StartableArtifact ? ((StartableArtifact) o1).getPhase() : StartPhase.NORMAL;
+						StartPhase phase2 = o2 instanceof StartableArtifact ? ((StartableArtifact) o2).getPhase() : StartPhase.NORMAL;
+						return phase2.ordinal() - phase1.ordinal();
+					}
+				});
+				for (StoppableArtifact artifact : artifacts) {
+					// if it is either not startable or running, stop it
+					if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+						logger.info("Stopping " + artifact.getId());
+						try {
+							artifact.stop();
+						}
+						catch (Exception e) {
+							logger.error("Failed to shut down " + artifact.getId(), e);
+						}
+					}
+				}
+			}
+		}));
+		
 		startupTime = new Date();
 		Thread.currentThread().setContextClassLoader(repository.getClassLoader());
 		repository.start();
