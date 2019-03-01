@@ -50,6 +50,7 @@ import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
+import be.nabu.libs.artifacts.api.TwoPhaseStartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact.StartPhase;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.authentication.api.Authenticator;
@@ -143,6 +144,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private Thread queueExecutionThread;
 	private ExecutorService pool;
 	private CollaborationListener collaborationListener;
+	private boolean shuttingDown;
 	
 	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
 		this.roleHandler = roleHandler;
@@ -349,7 +351,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								delayedNodeEvents.add(nodeEvent);
 							}
 							else {
-								start(nodeEvent, true);
+								start(nodeEvent, true, true);
 							}
 						}
 					}
@@ -368,7 +370,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 									delayedNodeEvents.add(nodeEvent);
 								}
 								else {
-									start((StartableArtifact) nodeEvent.getNode().getArtifact(), true);
+									start((StartableArtifact) nodeEvent.getNode().getArtifact(), true, true);
 								}
 							}
 						}
@@ -472,6 +474,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 						}
 						orderNodes(repository, delayedNodeEvents);
 						// TODO: load in dependency order!
+						List<TwoPhaseStartableArtifact> twoPhasers = new ArrayList<TwoPhaseStartableArtifact>();
 						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
 							try {
 								if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
@@ -482,11 +485,25 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								}
 								else if (StartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && !disableStartup) {
 									// don't recurse, on start we should be starting all the nodes
-									start(delayedNodeEvent, false);
+									start(delayedNodeEvent, false, false);
+								}
+								if (TwoPhaseStartableArtifact.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass())) {
+									twoPhasers.add((TwoPhaseStartableArtifact) getNode(delayedNodeEvent).getArtifact());
 								}
 							}
 							catch (Throwable e) {
 								logger.error("Could not run delayed node event: " + delayedNodeEvent.getState() + " on " + delayedNodeEvent.getId(), e);
+							}
+						}
+						// for two phase artifacts, we wait until everything is done before doing the final phase
+						// e.g. a http server should only go live once all the applications on it are loaded
+						for (TwoPhaseStartableArtifact twoPhaser : twoPhasers) {
+							try {
+								logger.info("Finalizing " + twoPhaser.getClass().getSimpleName() + ": " + twoPhaser.getId());
+								twoPhaser.finish();
+							}
+							catch (Throwable e) {
+								logger.error("Could not run second phase of artifact: " + twoPhaser.getId(), e);
 							}
 						}
 						if (isStarted) {
@@ -542,9 +559,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		}
 	}
 	
-	private void start(NodeEvent nodeEvent, boolean recursive) {
+	private void start(NodeEvent nodeEvent, boolean recursive, boolean finish) {
 		try {
-			start((StartableArtifact) getNode(nodeEvent).getArtifact(), recursive);
+			Artifact artifact = getNode(nodeEvent).getArtifact();
+			start((StartableArtifact) artifact, recursive, finish);
 		}
 		catch (IOException e) {
 			logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
@@ -663,21 +681,28 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 //		getHTTPServer().getDispatcher(null).subscribe(HTTPRequest.class, new MavenListener(repository.getMavenRepository(), "maven"));
 	}
 	
-	private void start(StartableArtifact artifact, boolean recursive) {
+	private void start(StartableArtifact artifact, boolean recursive, boolean finish) {
 		logger.info("Starting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
+			if (shuttingDown) {
+				throw new RuntimeException("Can't start artifact: " + artifact.getId() + " during shutdown");
+			}
 			artifact.start();
 			if (recursive) {
 				for (String dependency : repository.getDependencies(artifact.getId())) {
 					try {
 						if (repository.getNode(dependency).getArtifact() instanceof StartableArtifact) {
-							start((StartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+							start((StartableArtifact) repository.getNode(dependency).getArtifact(), recursive, finish);
 						}
 					}
 					catch (Exception e) {
 						logger.error("Could not start dependency: " + dependency, e);
 					}
 				}
+			}
+			if (finish && artifact instanceof TwoPhaseStartableArtifact) {
+				logger.info("Finalizing " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
+				((TwoPhaseStartableArtifact) artifact).finish();
 			}
 			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true);
 		}
@@ -694,7 +719,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		}
 		else if (resolved instanceof StartableArtifact && resolved instanceof StoppableArtifact) {
 			stop((StoppableArtifact) resolved, true);
-			start((StartableArtifact) resolved, true);
+			start((StartableArtifact) resolved, true, true);
 		}
 	}
 	
@@ -708,7 +733,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public void start(String id) {
 		Artifact resolved = getRepository().resolve(id);
 		if (resolved instanceof StartableArtifact) {
-			start((StartableArtifact) resolved, true);
+			start((StartableArtifact) resolved, true, true);
 		}
 	}
 	
@@ -729,7 +754,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								restart((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
 							}
 							else {
-								start((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive);
+								start((RestartableArtifact) repository.getNode(dependency).getArtifact(), recursive, true);
 							}
 						}
 					}
@@ -838,6 +863,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
 			public void run() {
 				logger.info("Shutting down server");
+				shuttingDown = true;
 				List<StoppableArtifact> artifacts = repository.getArtifacts(StoppableArtifact.class);
 				// we want to reverse sort them, if they had to start late, they have to be shut down first
 				artifacts.sort(new Comparator<StoppableArtifact>() {
