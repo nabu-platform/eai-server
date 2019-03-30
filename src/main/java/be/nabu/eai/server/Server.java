@@ -214,7 +214,16 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public void runInPool(final Service service, final ExecutionContext context, final ComplexContent content) {
 		pool.submit(new Runnable() {
 			public void run() {
-				Server.this.run(service, context, content);
+				try {
+					Future<ServiceResult> run = Server.this.run(service, context, content);
+					ServiceResult serviceResult = run.get();
+					if (serviceResult != null && serviceResult.getException() != null) {
+						logger.error("Could not run service" + (service instanceof DefinedService ? ": " + ((DefinedService) service).getId() : ""), serviceResult.getException());	
+					}
+				}
+				catch (Exception e) {
+					logger.error("Failed to run service" + (service instanceof DefinedService ? ": " + ((DefinedService) service).getId() : ""), e);
+				}
 			}
 		});
 	}
