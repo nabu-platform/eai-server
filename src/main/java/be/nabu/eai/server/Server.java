@@ -32,6 +32,7 @@ import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.ClusteredServer;
+import be.nabu.eai.repository.api.ExecutorServiceProvider;
 import be.nabu.eai.repository.api.MavenRepository;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.eai.repository.api.Repository;
@@ -104,7 +105,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 
-public class Server implements NamedServiceRunner, ClusteredServiceRunner, ClusteredServer {
+public class Server implements NamedServiceRunner, ClusteredServiceRunner, ClusteredServer, ExecutorServiceProvider {
 	
 	public static final String SERVICE_THREAD_POOL = "be.nabu.eai.server.serviceThreadPoolSize";
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
@@ -1150,6 +1151,11 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 
 	public Date getStartupTime() {
 		return startupTime;
+	}
+
+	@Override
+	public ExecutorService getExecutorService() {
+		return pool;
 	}
 
 }
