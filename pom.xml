@@ -39,6 +39,10 @@
 			<artifactId>eai-repository</artifactId>
 		</dependency>
 		<dependency>
+			<groupId>be.nabu.utils</groupId>
+			<artifactId>utils-cep</artifactId>
+		</dependency>
+		<dependency>
 			<groupId>be.nabu.libs.services</groupId>
 			<artifactId>services-cache</artifactId>
 		</dependency>
