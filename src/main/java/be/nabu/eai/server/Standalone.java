@@ -30,7 +30,6 @@ import be.nabu.libs.authentication.api.PermissionHandler;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.cluster.hazelcast.HazelcastClusterInstance;
 import be.nabu.libs.cluster.local.LocalInstance;
-import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.resources.ResourceFactory;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.URIUtils;
@@ -155,6 +154,7 @@ public class Standalone {
 		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
 		boolean startup = new Boolean(getArgument("startup", "true", args));
 		boolean logComplexEvents = new Boolean(getArgument("logComplexEvents", "true", args));
+		String cepService = getArgument("cepService", null, args);
 		long historizationInterval = Long.parseLong(getArgument("historizationInterval", "5000", args));
 		int historySize = Integer.parseInt(getArgument("historySize", "1000", args));
 		
@@ -241,6 +241,9 @@ public class Standalone {
 		
 		if (logComplexEvents) {
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
+		}
+		if (cepService != null) {
+			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEPProcessor(server, cepService));
 		}
 		
 		server.initialize();
