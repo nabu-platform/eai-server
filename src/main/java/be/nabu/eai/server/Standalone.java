@@ -82,7 +82,17 @@ public class Standalone {
 			}
 		}
 		
-		URI repository = new URI(URIUtils.encodeURI(getMandatoryArgument("repository", args)));
+		String repositoryString = getMandatoryArgument("repository", args);
+		// if absolute path but no scheme, use file
+		if (repositoryString.startsWith("/")) {
+			repositoryString = "file:" + repositoryString;
+		}
+		// if no scheme and no absolute path, we assume file relative to the current directory
+		else if (!repositoryString.matches("^[\\w]+:/.*")) {
+			repositoryString = "file:" + new File(repositoryString).getCanonicalPath();
+		}
+		logger.info("Repository located at: " + repositoryString);
+		URI repository = new URI(URIUtils.encodeURI(repositoryString));
 		ResourceContainer<?> repositoryRoot = (ResourceContainer<?>) ResourceFactory.getInstance().resolve(repository, null);
 		if (repositoryRoot == null) {
 			throw new IOException("The directory for the repository does not exist: " + repository);
