@@ -284,7 +284,7 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Encrypted Eagle: 5.2-SNAPSHOT";
+		return "Faraday Fox: 6.0";
 	}
 	
 	@GET

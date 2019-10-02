@@ -26,16 +26,22 @@ public class ServerConnection {
 	private RemoteServer remote;
 	private String host;
 	private Integer port;
+	private boolean secure;
 	private SSLContext context;
 	private Principal principal;
 	private String name;
 	private int socketTimeout = 60*1000*15, connectionTimeout = 60*1000;
 	
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port) {
+		this(context, principal, host, port, false);
+	}
+	
+	public ServerConnection(SSLContext context, Principal principal, String host, Integer port, boolean secure) {
 		this.context = context;
 		this.principal = principal;
 		this.host = host;
 		this.port = port;
+		this.secure = secure;
 	}
 	
 	public URI getMavenRoot() throws IOException {
@@ -85,7 +91,7 @@ public class ServerConnection {
 		if (remote == null) {
 			synchronized(this) {
 				try {
-					remote = new RemoteServer(getClient(), new URI("http://" + host + ":" + port), principal, Charset.forName("UTF-8"));
+					remote = new RemoteServer(getClient(), new URI((secure ? "https" : "http") + "://" + host + ":" + port), principal, Charset.forName("UTF-8"));
 				}
 				catch (URISyntaxException e) {
 					throw new RuntimeException(e);
@@ -125,6 +131,18 @@ public class ServerConnection {
 
 	public void setConnectionTimeout(int connectionTimeout) {
 		this.connectionTimeout = connectionTimeout;
+	}
+
+	public boolean isSecure() {
+		return secure;
+	}
+
+	public void setSecure(boolean secure) {
+		this.secure = secure;
+	}
+
+	public void setPrincipal(Principal principal) {
+		this.principal = principal;
 	}
 	
 }

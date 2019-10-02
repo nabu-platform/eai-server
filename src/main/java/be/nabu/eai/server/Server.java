@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -100,6 +101,7 @@ import be.nabu.libs.types.api.ComplexType;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.utils.aspects.AspectUtils;
+import be.nabu.utils.cep.impl.ComplexEventImpl;
 import ch.qos.logback.classic.AsyncAppender;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -146,10 +148,13 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private ExecutorService pool;
 	private CollaborationListener collaborationListener;
 	private boolean shuttingDown;
+	private CEPProcessor processor;
+	private ComplexEventImpl startupEvent;
 	
-	public Server(RoleHandler roleHandler, MavenRepository repository) throws IOException {
+	Server(RoleHandler roleHandler, MavenRepository repository, ComplexEventImpl startupEvent) throws IOException {
 		this.roleHandler = roleHandler;
 		this.repository = repository;
+		this.startupEvent = startupEvent;
 	}
 	
 	private void initializeListeners() {
@@ -523,6 +528,16 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 							logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
 							isStarted = true;
 							initializeListeners();
+							// it may have built up a number of startup exceptions, interesting to send those along
+							if (processor != null) {
+								if (startupEvent != null) {
+									startupEvent.setStopped(new Date());
+									startupEvent.setDuration(startupEvent.getStopped().getTime() - startupEvent.getStarted().getTime());
+									startupEvent.setTimezone(TimeZone.getDefault());
+									repository.getComplexEventDispatcher().fire(startupEvent, Server.this);
+								}
+								processor.start();
+							}
 						}
 					}
 					else {
@@ -1156,6 +1171,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	@Override
 	public ExecutorService getExecutorService() {
 		return pool;
+	}
+
+	public CEPProcessor getProcessor() {
+		return processor;
+	}
+
+	public void setProcessor(CEPProcessor processor) {
+		this.processor = processor;
 	}
 
 }

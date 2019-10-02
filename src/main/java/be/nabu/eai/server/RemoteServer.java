@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Future;
 
+import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.http.api.HTTPResponse;
 import be.nabu.libs.http.api.client.ClientAuthenticationHandler;
@@ -68,7 +69,7 @@ public class RemoteServer implements NamedServiceRunner {
 	public Map<String, URI> getAliases() throws IOException, FormatException, ParseException, URISyntaxException {
 		Map<String, URI> aliases = new HashMap<String, URI>();
 		for (String alias : getSetting("aliases").split("[\\s]*,[\\\\s]*")) {
-			URI value = new URI("remote://" + endpoint.getAuthority() + "/alias/" + alias);
+			URI value = new URI((endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority() + "/alias/" + alias);
 			aliases.put(alias, value);
 		}
 		return aliases;
@@ -79,7 +80,7 @@ public class RemoteServer implements NamedServiceRunner {
 		URI uri = new URI(repository);
 		// if we have no host, use the one from the endpoint
 		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
-			uri = new URI(repository.replace("remote:", "remote://" + endpoint.getAuthority()));
+			uri = new URI(repository.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority()));
 		}
 		System.out.println("Repository: " + uri);
 		return uri;
@@ -91,7 +92,7 @@ public class RemoteServer implements NamedServiceRunner {
 			URI uri = new URI(maven);
 			// if we have no host, use the one from the endpoint
 			if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
-				uri = new URI(maven.replace("remote:", "remote://" + endpoint.getAuthority()));
+				uri = new URI(maven.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority()));
 			}
 			System.out.println("Modules: " + uri);
 			return uri;
@@ -100,7 +101,7 @@ public class RemoteServer implements NamedServiceRunner {
 	}
 	
 	public Boolean requiresAuthentication() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
-		String setting = getSetting("authentication");
+		String setting = getSetting("authentication", true);
 		boolean result = setting == null ? false : Boolean.parseBoolean(setting);
 		System.out.println("Server requires authentication: " + result);
 		return result;
@@ -121,7 +122,12 @@ public class RemoteServer implements NamedServiceRunner {
 			return getSetting("version");
 		}
 		catch (Exception e) {
-			throw new RuntimeException(e);
+			if (e instanceof RuntimeException) {
+				throw (RuntimeException) e;
+			}
+			else {
+				throw new RuntimeException(e);
+			}
 		}
 	}
 	
@@ -177,13 +183,23 @@ public class RemoteServer implements NamedServiceRunner {
 		}
 	}
 	
-	private String getSetting(String name) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
+	private String getSetting(String name) throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
+		return this.getSetting(name, false);
+	}
+	
+	private String getSetting(String name, boolean isForAuthentication) throws IOException, FormatException, ParseException, URISyntaxException, UnsupportedEncodingException {
 		if (!settings.containsKey(name)) {
 			synchronized(settings) {
 				if (!settings.containsKey(name)) {
 					URI target = URIUtils.getChild(endpoint, "/settings/" + name);
 					HTTPResponse response = request(HTTPUtils.get(target));
-					if (!isOk(response.getCode())) {
+					if (response.getCode() == 401) {
+						if (isForAuthentication) {
+							return "true";
+						}
+						throw new HTTPException(401);
+					}
+					else if (!isOk(response.getCode())) {
 						throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
 					}
 					if (!(response.getContent() instanceof ContentPart)) {
@@ -302,6 +318,10 @@ public class RemoteServer implements NamedServiceRunner {
 
 	public Principal getPrincipal() {
 		return principal;
+	}
+
+	public void setPrincipal(Principal principal) {
+		this.principal = principal;
 	}
 	
 }

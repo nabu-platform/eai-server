@@ -17,6 +17,8 @@ import be.nabu.libs.services.api.SecurityContext;
 import be.nabu.libs.services.api.ServiceContext;
 import be.nabu.libs.services.api.TransactionContext;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.utils.cep.api.ComplexEvent;
+import be.nabu.utils.cep.api.EventSeverity;
 
 public class CEPProcessor implements EventHandler<Object, Void> {
 
@@ -26,22 +28,26 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 	private Thread thread;
 	private List<Object> events = new ArrayList<Object>();
 	private Logger logger = LoggerFactory.getLogger(getClass());
+	private EventSeverity cepSeverity = EventSeverity.valueOf(System.getProperty("cepSeverity", "INFO"));
+	private boolean stopped;
 
 	public CEPProcessor(Server server, String cepService) {
 		this.server = server;
 		this.cepService = cepService;
-		this.thread = new Thread(new Runnable() {
+	}
+
+	public void start() {
+		Thread thread = new Thread(new Runnable() {
 			@Override
 			public void run() {
 				while (true) {
 					try {
 						if (events.size() > 0) {
 							ArrayList<Object> eventsToProcess;
+							DefinedService service = getService();
 							synchronized(events) {
 								eventsToProcess = new ArrayList<Object>(events);
-								events.removeAll(eventsToProcess);
 							}
-							DefinedService service = getService();
 							if (service != null) {
 								ComplexContent newInstance = service.getServiceInterface().getInputDefinition().newInstance();
 								newInstance.set("events", eventsToProcess);
@@ -80,10 +86,20 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 									}
 									
 								});
-								serviceRuntime.run(newInstance);
+								ComplexContent run = serviceRuntime.run(newInstance);
+								boolean handled = true;
+								if (run != null && run.getType().get("handled") != null) {
+									handled = run.get("handled") == null || (Boolean) run.get("handled");
+								}
+								if (handled) {
+									synchronized(events) {
+										events.removeAll(eventsToProcess);
+									}
+								}
 							}
 							else {
 								logger.warn("Could not find event service: " + cepService);
+								break;
 							}
 						}
 					}
@@ -91,15 +107,17 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 						logger.error("Could not process complex events", e);
 					}
 					try {
-						Thread.sleep(10000);
+						Thread.sleep(5000);
 					}
 					catch (InterruptedException e) {
 						// ignore
 					}
 				}
+				stopped = true;
 			}
 		});
-		this.thread.start();
+		thread.start();
+		this.thread = thread;
 	}
 
 	private DefinedService getService() {
@@ -115,13 +133,33 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 	
 	@Override
 	public Void handle(Object event) {
-		if (event != null) {
+		if (event != null && !stopped) {
+			EventSeverity severity = null;
+			// if we have an event that has a low severity, skip it
+			if (event instanceof ComplexEvent) {
+				severity = ((ComplexEvent) event).getSeverity();
+			}
+			else if (event instanceof ComplexContent && ((ComplexContent) event).getType().get("severity") != null) {
+				Object object = ((ComplexContent) event).get("severity");
+				if (object instanceof EventSeverity) {
+					severity = (EventSeverity) object;
+				}
+			}
+			if (severity != null && severity.ordinal() < cepSeverity.ordinal()) {
+				return null;
+			}
 			synchronized(events) {
 				events.add(event);
 			}
 			// if it is getting too much, interrupt the thread for processing (if applicable)
-			if (events.size() > 50) {
+			if (events.size() > 50 && thread != null) {
 				thread.interrupt();
+			}
+			// we have too many and apparently we can't dump 'em
+			else if (events.size() > 500) {
+				synchronized(events) {	
+					events.remove(0);
+				}
 			}
 		}
 		return null;

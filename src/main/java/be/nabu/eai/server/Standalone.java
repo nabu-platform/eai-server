@@ -8,9 +8,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
@@ -41,6 +44,8 @@ import be.nabu.libs.resources.file.FileDirectory;
 import be.nabu.libs.resources.snapshot.SnapshotUtils;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.pojo.POJOUtils;
+import be.nabu.utils.cep.api.EventSeverity;
+import be.nabu.utils.cep.impl.ComplexEventImpl;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.io.api.ByteBuffer;
 import be.nabu.utils.io.api.ReadableContainer;
@@ -55,6 +60,12 @@ public class Standalone {
 		if (args.length > 0 && args[0].equalsIgnoreCase("stop")) {
 			System.exit(0);
 		}
+		ComplexEventImpl startupEvent = new ComplexEventImpl();
+		startupEvent.setEventName("nabu-server-start");
+		startupEvent.setStarted(new Date());
+		startupEvent.setCreated(startupEvent.getStarted());
+		startupEvent.setSeverity(EventSeverity.INFO);
+		
 		String propertiesFileName = getArgument("properties", "server.properties", args);
 		File propertiesFile = new File(propertiesFileName);
 		if (propertiesFile.exists()) {
@@ -177,6 +188,7 @@ public class Standalone {
 		String localMavenServer = getArgument("localMavenServer", null, args);
 		String serverName = getArgument("name", null, args);
 		String groupName = getArgument("group", null, args);
+		String aliasName = getArgument("alias", null, args);
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
@@ -187,6 +199,10 @@ public class Standalone {
 		repositoryInstance.setLicenseManager(licenseManager);
 		repositoryInstance.setHistorizationInterval(historizationInterval);
 		repositoryInstance.setHistorySize(historySize);
+		
+		if (aliasName != null) {
+			repositoryInstance.getAliases().addAll(Arrays.asList(aliasName.split("[\\s]*,[\\s]*")));
+		}
 
 		if (roleService != null) {
 			Artifact resolve = repositoryInstance.resolve(roleService);
@@ -209,7 +225,7 @@ public class Standalone {
 		}
 		
 		// create the server
-		Server server = new Server(roleHandler, repositoryInstance);
+		Server server = new Server(roleHandler, repositoryInstance, startupEvent);
 		
 		if (!startup) {
 			server.setDisableStartup(true);
@@ -252,8 +268,11 @@ public class Standalone {
 		if (logComplexEvents) {
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
 		}
+		CEPProcessor cepProcessor = null;
 		if (cepService != null) {
-			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEPProcessor(server, cepService));
+			cepProcessor = new CEPProcessor(server, cepService);
+			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
+			server.setProcessor(cepProcessor);
 		}
 		
 		server.initialize();
@@ -296,6 +315,7 @@ public class Standalone {
 				server.enableMaven();
 			}
 		}
+		
 		if (server.hasHTTPServer()) {
 			server.getHTTPServer().start();
 		}
