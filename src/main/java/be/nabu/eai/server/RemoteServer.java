@@ -101,7 +101,7 @@ public class RemoteServer implements NamedServiceRunner {
 	}
 	
 	public Boolean requiresAuthentication() throws UnsupportedEncodingException, IOException, FormatException, ParseException, URISyntaxException {
-		String setting = getSetting("authentication", true);
+		String setting = getSetting("version", true);
 		boolean result = setting == null ? false : Boolean.parseBoolean(setting);
 		System.out.println("Server requires authentication: " + result);
 		return result;

@@ -1,5 +1,6 @@
 package be.nabu.eai.server;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.Charset;
@@ -17,6 +18,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.Notification;
+import be.nabu.eai.repository.events.ResourceEvent;
+import be.nabu.eai.server.CollaborationListener.CollaborationMessage;
+import be.nabu.eai.server.CollaborationListener.CollaborationMessageType;
 import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
@@ -38,6 +42,13 @@ import be.nabu.libs.nio.api.Pipeline;
 import be.nabu.libs.nio.api.StandardizedMessagePipeline;
 import be.nabu.libs.nio.api.events.ConnectionEvent;
 import be.nabu.libs.nio.api.events.ConnectionEvent.ConnectionState;
+import be.nabu.libs.types.ComplexContentWrapperFactory;
+import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.binding.api.Window;
+import be.nabu.libs.types.binding.xml.XMLBinding;
+import be.nabu.utils.cep.api.ComplexEvent;
+import be.nabu.utils.cep.api.EventSeverity;
 import be.nabu.utils.mime.api.Header;
 
 public class CollaborationListener {
@@ -88,6 +99,23 @@ public class CollaborationListener {
 				return null;
 			}
 		});
+		server.getRepository().getEventDispatcher().subscribe(ResourceEvent.class, new EventHandler<ResourceEvent, Void>() {
+			@Override
+			public Void handle(ResourceEvent event) {
+				CollaborationMessageType type;
+				switch(event.getState()) {
+					case CREATE: type = CollaborationMessageType.CREATE; break;
+					case DELETE: type = CollaborationMessageType.DELETE; break;
+					default: type = CollaborationMessageType.UPDATE;
+				}
+				String id = event.getArtifactId();
+				if (event.getPath() != null) {
+					id += ":" + event.getPath().replaceFirst("^[/]+", "");
+				}
+				broadcast(WebSocketUtils.newMessage(marshal(new CollaborationMessage(type, "Direct Server Action", id))), new ArrayList<Pipeline>());
+				return null;
+			}
+		});
 		
 		server.getHTTPServer().getDispatcher().subscribe(ConnectionEvent.class, new EventHandler<ConnectionEvent, Void>() {
 			@SuppressWarnings("unchecked")
@@ -123,6 +151,37 @@ public class CollaborationListener {
 				return null;
 			}
 		});
+		
+		// not enabled yet
+//		server.getRepository().getComplexEventDispatcher().subscribe(Object.class, new EventHandler<Object, Void>() {
+//			@Override
+//			public Void handle(Object event) {
+//				if (event != null) {
+//					EventSeverity severity = null;
+//					// if we have an event that has a low severity, skip it
+//					if (event instanceof ComplexEvent) {
+//						severity = ((ComplexEvent) event).getSeverity();
+//					}
+//					else if (event instanceof ComplexContent && ((ComplexContent) event).getType().get("severity") != null) {
+//						Object object = ((ComplexContent) event).get("severity");
+//						if (object instanceof EventSeverity) {
+//							severity = (EventSeverity) object;
+//						}
+//					}
+//					if (severity != null && severity.ordinal() < EventSeverity.INFO.ordinal()) {
+//						return null;
+//					}
+//					if (!(event instanceof ComplexContent)) {
+//						event = ComplexContentWrapperFactory.getInstance().getWrapper().wrap(event);
+//					}
+//					if (event != null) {
+//						WebSocketMessage newMessage = WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.EVENT, marshalComplex((ComplexContent) event))));
+//						broadcast(newMessage, null);
+//					}
+//				}
+//				return null;
+//			}
+//		});
 	}
 	
 	public void broadcast(WebSocketMessage message, List<Pipeline> blacklist) {
@@ -151,6 +210,28 @@ public class CollaborationListener {
 		return WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.USERS, marshal(userList))));
 	}
 	
+	public static byte [] marshalComplex(ComplexContent content) {
+		try {
+			XMLBinding binding = new XMLBinding(content.getType(), Charset.forName("UTF-8"));
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			binding.marshal(output, content);
+			return output.toByteArray();
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	public static ComplexContent unmarshalComplex(byte [] bytes, ComplexType type) {
+		try {
+			XMLBinding binding = new XMLBinding(type, Charset.forName("UTF-8"));
+			return binding.unmarshal(new ByteArrayInputStream(bytes), new Window[0]);
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
 	public static <T> byte [] marshal(T content) {
 		try {
 			Marshaller marshaller = JAXBContext.newInstance(content.getClass()).createMarshaller();
@@ -175,7 +256,7 @@ public class CollaborationListener {
 	}
 
 	public enum CollaborationMessageType {
-		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE, LOG, LOCKS, NOTIFICATION, REQUEST_LOCK
+		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE, LOG, LOCKS, NOTIFICATION, REQUEST_LOCK, EVENT
 	}
 	
 	@XmlRootElement

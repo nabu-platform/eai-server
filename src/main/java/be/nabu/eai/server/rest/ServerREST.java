@@ -284,7 +284,7 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Faraday Fox: 6.0";
+		return "Faraday Fox: 6.1-SNAPSHOT";
 	}
 	
 	@GET
