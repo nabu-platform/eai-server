@@ -49,6 +49,7 @@ import be.nabu.utils.mime.impl.PlainMimeContentPart;
 
 public class RemoteServer implements NamedServiceRunner {
 	
+	private String path;
 	private Charset charset;
 	private HTTPClient client;
 	private URI endpoint;
@@ -61,6 +62,10 @@ public class RemoteServer implements NamedServiceRunner {
 		this.endpoint = endpoint;
 		this.principal = principal;
 		this.charset = charset;
+		this.path = URIUtils.encodeURI(endpoint.getPath() == null ? "" : endpoint.getPath().replaceAll("[/]+$", ""));
+		if (!this.path.startsWith("/") && !this.path.isEmpty()) {
+			this.path = "/" + this.path;
+		}
 		if (this.principal != null) {
 			this.authenticationHandler = new SPIAuthenticationHandler();
 		}
@@ -69,7 +74,7 @@ public class RemoteServer implements NamedServiceRunner {
 	public Map<String, URI> getAliases() throws IOException, FormatException, ParseException, URISyntaxException {
 		Map<String, URI> aliases = new HashMap<String, URI>();
 		for (String alias : getSetting("aliases").split("[\\s]*,[\\\\s]*")) {
-			URI value = new URI((endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority() + "/alias/" + alias);
+			URI value = new URI((endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority() + this.path + "/alias/" + alias);
 			aliases.put(alias, value);
 		}
 		return aliases;
@@ -80,7 +85,7 @@ public class RemoteServer implements NamedServiceRunner {
 		URI uri = new URI(repository);
 		// if we have no host, use the one from the endpoint
 		if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
-			uri = new URI(repository.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority()));
+			uri = new URI(repository.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority() + this.path));
 		}
 		System.out.println("Repository: " + uri);
 		return uri;
@@ -92,7 +97,7 @@ public class RemoteServer implements NamedServiceRunner {
 			URI uri = new URI(maven);
 			// if we have no host, use the one from the endpoint
 			if (uri.getScheme().equals("remote") && uri.getAuthority() == null) {
-				uri = new URI(maven.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority()));
+				uri = new URI(maven.replace("remote:", (endpoint.getScheme().equals("https") ? "remotes" : "remote") + "://" + endpoint.getAuthority() + this.path));
 			}
 			System.out.println("Modules: " + uri);
 			return uri;

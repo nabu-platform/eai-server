@@ -19,8 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.Notification;
 import be.nabu.eai.repository.events.ResourceEvent;
-import be.nabu.eai.server.CollaborationListener.CollaborationMessage;
-import be.nabu.eai.server.CollaborationListener.CollaborationMessageType;
 import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
@@ -42,13 +40,10 @@ import be.nabu.libs.nio.api.Pipeline;
 import be.nabu.libs.nio.api.StandardizedMessagePipeline;
 import be.nabu.libs.nio.api.events.ConnectionEvent;
 import be.nabu.libs.nio.api.events.ConnectionEvent.ConnectionState;
-import be.nabu.libs.types.ComplexContentWrapperFactory;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.ComplexType;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
-import be.nabu.utils.cep.api.ComplexEvent;
-import be.nabu.utils.cep.api.EventSeverity;
 import be.nabu.utils.mime.api.Header;
 
 public class CollaborationListener {
@@ -80,6 +75,7 @@ public class CollaborationListener {
 		server.getHTTPServer().getDispatcher().subscribe(WebSocketRequest.class, new EventHandler<WebSocketRequest, WebSocketMessage>() {
 			@Override
 			public WebSocketMessage handle(WebSocketRequest event) {
+				logger.debug("Incoming websocket message from source for path: {}", event.getPath());
 				if ("/collaborate".equals(event.getPath())) {
 					CollaborationMessage message = unmarshal(event.getData(), CollaborationMessage.class);
 					
