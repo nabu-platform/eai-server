@@ -168,7 +168,7 @@ public class Standalone {
 		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
 		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
 		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
-		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "false", args));
+		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "true", args));
 		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
 		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
 		boolean historizeGauges = new Boolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));

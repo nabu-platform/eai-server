@@ -36,7 +36,7 @@ public class ServerConnection {
 		this(context, principal, host, port, false);
 	}
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port, boolean secure) {
-		this(context, principal, host, port, secure, null);
+		this(context, principal, host, port, secure, "");
 	}
 	public ServerConnection(SSLContext context, Principal principal, String host, Integer port, boolean secure, String path) {
 		this.context = context;
