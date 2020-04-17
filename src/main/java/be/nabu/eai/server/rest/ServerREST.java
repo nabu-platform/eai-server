@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.text.ParseException;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.concurrent.ExecutionException;
@@ -27,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.api.Entry;
+import be.nabu.eai.repository.api.FeaturedExecutionContext;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.api.ResourceEntry;
 import be.nabu.eai.repository.resources.RepositoryEntry;
@@ -39,6 +41,7 @@ import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.resources.api.features.CacheableResource;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.api.DefinedService;
+import be.nabu.libs.services.api.ExecutionContext;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.types.api.ComplexContent;
@@ -154,6 +157,8 @@ public class ServerREST {
 			principal = new ImpersonateToken(null, realmHeader == null ? null : realmHeader.getValue(), header.getValue());
 		}
 		
+		final Header additionalFeatures = MimeUtils.getHeader("Feature", headers);
+		
 		final Header serviceContextHeader = MimeUtils.getHeader("Service-Context", headers);
 		try {
 			// ignore empty values, likely a bad input from the developer
@@ -162,7 +167,11 @@ public class ServerREST {
 				ServiceRuntime.setGlobalContext(new HashMap<String, Object>());
 				ServiceRuntime.getGlobalContext().put("service.context", serviceContextHeader.getValue());
 			}
-			Future<ServiceResult> future = repository.getServiceRunner().run(service, repository.newExecutionContext(principal), input);
+			ExecutionContext newExecutionContext = repository.newExecutionContext(principal);
+			if (additionalFeatures != null && additionalFeatures.getValue() != null && !additionalFeatures.getValue().trim().isEmpty()) {
+				((FeaturedExecutionContext) newExecutionContext).getEnabledFeatures().addAll(Arrays.asList(additionalFeatures.getValue().split("[\\s]*,[\\s]*")));
+			}
+			Future<ServiceResult> future = repository.getServiceRunner().run(service, newExecutionContext, input);
 			try {
 				ServiceResult serviceResult = future.get();
 				if (serviceResult.getException() != null) {

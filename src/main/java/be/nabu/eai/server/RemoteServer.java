@@ -247,6 +247,7 @@ public class RemoteServer implements NamedServiceRunner {
 		}
 		Map<String, Object> globalContext = ServiceRuntime.getGlobalContext();
 		String serviceContext = globalContext == null ? null : (String) globalContext.get("service.context");
+		String additionalFeatures = globalContext == null ? null : (String) globalContext.get("features.additional");
 		URI target = URIUtils.getChild(endpoint, "/invoke/" + ((DefinedService) service).getId());
 		XMLBinding xmlBinding = new XMLBinding(input.getType(), charset);
 		ServiceException exception = null;
@@ -270,6 +271,9 @@ public class RemoteServer implements NamedServiceRunner {
 			}
 			if (serviceContext != null) {
 				request.getContent().setHeader(new MimeHeader("Service-Context", serviceContext));
+			}
+			if (additionalFeatures != null) {
+				request.getContent().setHeader(new MimeHeader("Feature", additionalFeatures));
 			}
 			HTTPResponse response = request(request);
 			
