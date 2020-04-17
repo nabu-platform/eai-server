@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.api.Entry;
-import be.nabu.eai.repository.api.FeaturedExecutionContext;
 import be.nabu.eai.repository.api.Repository;
 import be.nabu.eai.repository.api.ResourceEntry;
 import be.nabu.eai.repository.resources.RepositoryEntry;
@@ -42,6 +41,7 @@ import be.nabu.libs.resources.api.features.CacheableResource;
 import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.FeaturedExecutionContext;
 import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.types.api.ComplexContent;
