@@ -3,6 +3,8 @@ package be.nabu.eai.server;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.security.Principal;
@@ -150,6 +152,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private boolean shuttingDown;
 	private CEPProcessor processor;
 	private ComplexEventImpl startupEvent;
+	private Map<String, BatchResultFuture> futures = new HashMap<String, BatchResultFuture>();
 	
 	Server(RoleHandler roleHandler, MavenRepository repository, ComplexEventImpl startupEvent) throws IOException {
 		this.roleHandler = roleHandler;
@@ -193,38 +196,147 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					}
 				}
 			});
+			
+			ClusterTopic<ServiceExecutionResult> resultTopic = cluster.topic("server.result");
+			resultTopic.subscribe(new ClusterMessageListener<ServiceExecutionResult>() {
+				@Override
+				public void onMessage(ServiceExecutionResult message) {
+					try {
+						feedback(message);
+					}
+					catch (Exception e) {
+						logger.error("Could not report result", e);
+					}
+				}
+			});
+		}
+	}
+	
+	private ServiceResult toResult(ServiceExecutionResult execution) {
+		ComplexContent output = null;
+		ServiceException exception = null;
+		
+		if (execution.getErrorLog() != null) {
+			exception = new ServiceException(execution.getErrorCode() == null ? "REMOTE-1" : execution.getErrorCode(), execution.getErrorLog());
+		}
+		if (execution.getOutput() != null) {
+			Artifact service = repository.resolve(execution.getServiceId());
+			if (service instanceof DefinedService) {
+				XMLBinding binding = new XMLBinding(((DefinedService) service).getServiceInterface().getOutputDefinition(), Charset.forName("UTF-8"));
+				try {
+					output = binding.unmarshal(new ByteArrayInputStream(execution.getOutput().getBytes(Charset.forName("UTF-8"))), new Window[0]);
+				}
+				catch (Exception e) {
+					exception = new ServiceException("REMOTE-2", "Could not parse output received from remote server", e);
+				}
+			}
+		}
+		
+		ServiceException finalException = exception;
+		ComplexContent finalOutput = output;
+		return new ServiceResult() {
+			@Override
+			public ComplexContent getOutput() {
+				return finalOutput;
+			}
+			@Override
+			public ServiceException getException() {
+				return finalException;
+			}
+		};
+	}
+	
+	private void feedback(ServiceExecutionResult result) {
+		if (futures.containsKey(result.getRunId())) {
+			futures.get(result.getRunId()).addResult(toResult(result));
 		}
 	}
 
-	private void run(ServiceExecutionTask task) throws IOException, ParseException {
+	private Future<ServiceResult> run(ServiceExecutionTask task) throws IOException, ParseException {
 		DefinedService service = (DefinedService) repository.resolve(task.getServiceId());
 		if (service == null) {
 			throw new IllegalArgumentException("Could not find service: " + task.getServiceId());
 		}
-		ServiceRunner target = Server.this;
+		ServiceRunner target = null;
+		// if we have a target, we likely mean for example an execution pool
 		if (task.getTarget() != null) {
-			target = (ServiceRunner) repository.resolve(task.getTarget());
+			ServiceRunner intendedTarget = (ServiceRunner) repository.resolve(task.getTarget());
+			// if we found the target, use that
+			if (intendedTarget != null) {
+				target = intendedTarget;
+			}
+			// otherwise, check if we mean this server or this server group
+			else if (task.getTarget().equals(getName()) || task.getTarget().equals(repository.getGroup()) || (getAliases() != null && getAliases().contains(task.getTarget()))) {
+				target = Server.this;
+			}
 		}
-		if (target == null) {
-			throw new IllegalArgumentException("Could not find target: " + task.getTarget());
+		else {
+			target = Server.this;
 		}
-		
-		ComplexContent input = null;
-		if (task.getInput() != null) {
-			XMLBinding binding = new XMLBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
-			input = binding.unmarshal(new ByteArrayInputStream(task.getInput().getBytes(Charset.forName("UTF-8"))), new Window[0]);
+		// if we don't have a target, ignore this
+		if (target != null) {
+			ComplexContent input = null;
+			if (task.getInput() != null) {
+				XMLBinding binding = new XMLBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
+				input = binding.unmarshal(new ByteArrayInputStream(task.getInput().getBytes(Charset.forName("UTF-8"))), new Window[0]);
+			}
+			runInPool(service, repository.newExecutionContext(SystemPrincipal.ROOT), input, target, new ResultHandler() {
+				@Override
+				public void handle(ServiceResult result) {
+					ClusterInstance cluster = getCluster();
+					// we should only report our results if we had a run id to tie it to and we are living in a clustered world
+					if (cluster != null && task.getRunId() != null) {
+						ServiceExecutionResult output = new ServiceExecutionResult();
+						output.setRunId(task.getRunId());
+						output.setTarget(getName());
+						output.setServiceId(task.getServiceId());
+						if (result.getOutput() != null) {
+							XMLBinding binding = new XMLBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
+							ByteArrayOutputStream baos = new ByteArrayOutputStream();
+							try {
+								binding.marshal(baos, result.getOutput());
+							}
+							catch (IOException e) {
+								throw new RuntimeException(e);
+							}
+							output.setOutput(new String(baos.toByteArray(), Charset.forName("UTF-8")));
+						}
+						if (result.getException() != null) {
+							output.setErrorCode(result.getException().getCode());
+							StringWriter writer = new StringWriter();
+							PrintWriter printer = new PrintWriter(writer);
+							result.getException().printStackTrace(printer);
+							printer.flush();
+							output.setErrorLog(writer.toString());
+						}
+						cluster.topic("server.result").publish(output);
+					}
+				}
+			});
 		}
-		runInPool(service, repository.newExecutionContext(SystemPrincipal.ROOT), input);
+		return null;
 	}
 	
 	public void runInPool(final Service service, final ExecutionContext context, final ComplexContent content) {
+		runInPool(service, context, content, null, null);
+	}
+	
+	public static interface ResultHandler {
+		public void handle(ServiceResult result);
+	}
+	
+	public void runInPool(final Service service, final ExecutionContext context, final ComplexContent content, ServiceRunner runner, ResultHandler handler) {
 		pool.submit(new Runnable() {
 			public void run() {
 				try {
-					Future<ServiceResult> run = Server.this.run(service, context, content);
+					ServiceRunner target = runner == null ? Server.this : runner;
+					Future<ServiceResult> run = target.run(service, context, content);
 					ServiceResult serviceResult = run.get();
 					if (serviceResult != null && serviceResult.getException() != null) {
 						logger.error("Could not run service" + (service instanceof DefinedService ? ": " + ((DefinedService) service).getId() : ""), serviceResult.getException());	
+					}
+					if (handler != null) {
+						handler.handle(serviceResult);
 					}
 				}
 				catch (Exception e) {
