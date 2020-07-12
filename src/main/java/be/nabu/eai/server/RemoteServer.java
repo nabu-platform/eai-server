@@ -122,6 +122,15 @@ public class RemoteServer implements NamedServiceRunner {
 		}
 	}
 	
+	public String getUptime() {
+		try {
+			return getSetting("uptime");
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
 	public String getVersion() {
 		try {
 			return getSetting("version");

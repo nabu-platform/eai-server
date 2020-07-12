@@ -651,6 +651,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								processor.start();
 							}
 						}
+						// clear the delayed node events to free up some memory
+						delayedNodeEvents.clear();
 					}
 					else {
 						isRepositoryLoading = true;
