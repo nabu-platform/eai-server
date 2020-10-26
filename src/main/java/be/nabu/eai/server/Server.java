@@ -150,9 +150,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private ExecutorService pool;
 	private CollaborationListener collaborationListener;
 	private boolean shuttingDown;
-	private CEPProcessor processor;
+	private MultipleCEPProcessor processor;
 	private ComplexEventImpl startupEvent;
 	private Map<String, BatchResultFuture> futures = new HashMap<String, BatchResultFuture>();
+	private Runnable startedListener;
 	
 	Server(RoleHandler roleHandler, MavenRepository repository, ComplexEventImpl startupEvent) throws IOException {
 		this.roleHandler = roleHandler;
@@ -1038,6 +1039,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				serverListener.listen(Server.this, getHTTPServer());
 			}
 		}
+		
+		if (startedListener != null) {
+			startedListener.run();
+		}
 	}
 	
 	public URI getRepositoryRoot() {
@@ -1287,12 +1292,19 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		return pool;
 	}
 
-	public CEPProcessor getProcessor() {
+	public MultipleCEPProcessor getProcessor() {
 		return processor;
 	}
 
-	public void setProcessor(CEPProcessor processor) {
+	public void setProcessor(MultipleCEPProcessor processor) {
 		this.processor = processor;
 	}
 
+	public Runnable getStartedListener() {
+		return startedListener;
+	}
+
+	public void setStartedListener(Runnable startedListener) {
+		this.startedListener = startedListener;
+	}
 }

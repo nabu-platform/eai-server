@@ -162,11 +162,16 @@ public class ServerREST {
 		final Header serviceContextHeader = MimeUtils.getHeader("Service-Context", headers);
 		try {
 			// ignore empty values, likely a bad input from the developer
+			ServiceRuntime.setGlobalContext(new HashMap<String, Object>());
 			if (serviceContextHeader != null && serviceContextHeader.getValue() != null && !serviceContextHeader.getValue().trim().isEmpty()) {
 				// set it globally
-				ServiceRuntime.setGlobalContext(new HashMap<String, Object>());
 				ServiceRuntime.getGlobalContext().put("service.context", serviceContextHeader.getValue());
 			}
+			// if no explicit context is given, set the root service as context
+			else {
+				ServiceRuntime.getGlobalContext().put("service.context", serviceId);
+			}
+			ServiceRuntime.getGlobalContext().put("service.source", "invoke");
 			ExecutionContext newExecutionContext = repository.newExecutionContext(principal);
 			if (additionalFeatures != null && additionalFeatures.getValue() != null && !additionalFeatures.getValue().trim().isEmpty()) {
 				((FeaturedExecutionContext) newExecutionContext).getEnabledFeatures().addAll(Arrays.asList(additionalFeatures.getValue().split("[\\s]*,[\\s]*")));

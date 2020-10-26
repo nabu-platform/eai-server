@@ -13,7 +13,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
@@ -54,12 +53,24 @@ import be.nabu.utils.security.SecurityUtils;
 public class Standalone {
 	
 	private static Logger logger = LoggerFactory.getLogger(Standalone.class);
+	private Server server;
 	
 	public static void main(String...args) throws IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
 		// ask to stop
 		if (args.length > 0 && args[0].equalsIgnoreCase("stop")) {
 			System.exit(0);
 		}
+		Standalone alone = new Standalone();
+		alone.initialize(args);
+		alone.start();
+	}
+
+	public void start() throws IOException {
+		if (server.hasHTTPServer()) {
+			server.getHTTPServer().start();
+		}
+	}
+	public void initialize(String...args) throws FileNotFoundException, IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
 		ComplexEventImpl startupEvent = new ComplexEventImpl();
 		startupEvent.setEventName("nabu-server-start");
 		startupEvent.setStarted(new Date());
@@ -224,8 +235,7 @@ public class Standalone {
 			}
 		}
 		
-		// create the server
-		Server server = new Server(roleHandler, repositoryInstance, startupEvent);
+		server = new Server(roleHandler, repositoryInstance, startupEvent);
 		
 		if (!startup) {
 			server.setDisableStartup(true);
@@ -238,6 +248,13 @@ public class Standalone {
 		
 		// if it is not set to false, check if it is either true (use default settings) or points to a file
 		if (cluster != null && !cluster.equalsIgnoreCase("false")) {
+			
+			// hazelcast calls home once a day, it is not entirely clear _why_ but it sends information about the cluster
+			// I dislike this kind of practice out of principle so I rather disable it by default
+			// there is a system parameter for it as can be seen in the code:
+			// https://github.com/hazelcast/hazelcast/blob/master/hazelcast/src/main/java/com/hazelcast/internal/util/PhoneHome.java
+			System.setProperty("HZ_PHONE_HOME_ENABLED", "false");
+			
 			Config config;
 			// just use the default configuration
 			if (cluster.equalsIgnoreCase("true")) {
@@ -268,12 +285,15 @@ public class Standalone {
 		if (logComplexEvents) {
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
 		}
-		CEPProcessor cepProcessor = null;
+		MultipleCEPProcessor cepProcessor = new MultipleCEPProcessor(server);
+		server.setProcessor(cepProcessor);
+		// if we have registered one...add it (partly for backwards compatibility)
 		if (cepService != null) {
-			cepProcessor = new CEPProcessor(server, cepService);
-			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
-			server.setProcessor(cepProcessor);
+			for (String singleService : cepService.split(",")) {
+				cepProcessor.add(singleService.trim());
+			}
 		}
+		repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
 		
 		server.initialize();
 		
@@ -314,10 +334,6 @@ public class Standalone {
 			if (enableMaven) {
 				server.enableMaven();
 			}
-		}
-		
-		if (server.hasHTTPServer()) {
-			server.getHTTPServer().start();
 		}
 	}
 	

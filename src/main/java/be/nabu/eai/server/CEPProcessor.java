@@ -35,12 +35,16 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 		this.server = server;
 		this.cepService = cepService;
 	}
+	
+	public void stop() {
+		stopped = true;
+	}
 
 	public void start() {
 		Thread thread = new Thread(new Runnable() {
 			@Override
 			public void run() {
-				while (true) {
+				while (!stopped) {
 					try {
 						if (events.size() > 0) {
 							ArrayList<Object> eventsToProcess;
@@ -116,6 +120,8 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 				stopped = true;
 			}
 		});
+		thread.setDaemon(true);
+		thread.setName("cep-processor:" + cepService);
 		thread.start();
 		this.thread = thread;
 	}
@@ -165,4 +171,12 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 		return null;
 	}
 
+	public String getServiceId() {
+		return cepService;
+	}
+
+	public boolean isStopped() {
+		return stopped;
+	}
+	
 }
