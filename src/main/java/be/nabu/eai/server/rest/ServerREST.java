@@ -91,8 +91,8 @@ public class ServerREST {
 	@Path("/reload/{id}")
 	@GET
 	public void reload(@PathParam("id") String id) {
-		reloadClosestParent(id);
 		repository.reload(id);
+		reloadClosestParent(id);
 	}
 
 	private void reloadClosestParent(String id) {
@@ -119,14 +119,18 @@ public class ServerREST {
 					// best effort
 				}
 			}
+			// do an additional refresh
+			entry.refresh(false);
 		}
 	}
 	
 	@Path("/unload/{id}")
 	@GET
 	public void unload(@PathParam("id") String id) {
-		reloadClosestParent(id);
+		// first unload
 		repository.unload(id);
+		// then refresh file system
+		reloadClosestParent(id);
 	}
 	
 	@Path("/invoke/{service}")

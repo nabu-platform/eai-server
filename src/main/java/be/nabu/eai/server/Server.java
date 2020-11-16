@@ -2,6 +2,7 @@ package be.nabu.eai.server;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -52,11 +53,13 @@ import be.nabu.eai.server.api.ServerListener;
 import be.nabu.eai.server.api.ServerListener.Phase;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
+import be.nabu.libs.artifacts.api.OfflineableArtifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.TwoPhaseStartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact.StartPhase;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
+import be.nabu.libs.artifacts.api.TwoPhaseOfflineableArtifact;
 import be.nabu.libs.authentication.api.Authenticator;
 import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.authentication.api.Token;
@@ -115,6 +118,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
 	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
+	// whether or not the server is in "offline" mode (default not of course)
+	private boolean offline;
 	private MavenRepository repository;
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private List<ServiceRunnable> runningServices = new ArrayList<ServiceRunnable>();
@@ -827,7 +832,13 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			if (shuttingDown) {
 				throw new RuntimeException("Can't start artifact: " + artifact.getId() + " during shutdown");
 			}
-			artifact.start();
+			// if we are offline, start in that modus
+			if (offline && artifact instanceof OfflineableArtifact) {
+				((OfflineableArtifact) artifact).startOffline();
+			}
+			else {
+				artifact.start();
+			}
 			if (recursive) {
 				for (String dependency : repository.getDependencies(artifact.getId())) {
 					try {
@@ -854,7 +865,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	
 	public void restart(String id) {
 		Artifact resolved = getRepository().resolve(id);
-		if (resolved instanceof RestartableArtifact) {
+		// if it is offline, we don't do a "regular" startup, but rather an offline one
+		if (resolved instanceof RestartableArtifact && (!offline || !(resolved instanceof OfflineableArtifact))) {
 			restart((RestartableArtifact) resolved, true);
 		}
 		else if (resolved instanceof StartableArtifact && resolved instanceof StoppableArtifact) {
@@ -999,7 +1011,126 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		}
 	}
 	
+	public void bringOffline() {
+		logger.info("Bringing server offline");
+		// check if we starting in offline modus
+		String property = System.getProperty("user.home");
+		File target = property == null ? new File(".") : new File(property);
+		if (!target.exists()) {
+			target.mkdirs();
+		}
+		File offlineFile = new File(target, "nabu.offline");
+		if (!offlineFile.exists()) {
+			try {
+				offlineFile.createNewFile();
+			}
+			catch (IOException e) {
+				logger.warn("Could not create offline marker file, the server will remain online");
+				throw new RuntimeException(e);
+			}
+		}
+		offline = true;
+		List<TwoPhaseOfflineableArtifact> twoPhasers = new ArrayList<TwoPhaseOfflineableArtifact>();
+		List<OfflineableArtifact> artifacts = repository.getArtifacts(OfflineableArtifact.class);
+		// reverse sort for shutdown
+		artifacts.sort(new Comparator<OfflineableArtifact>() {
+			@Override
+			public int compare(OfflineableArtifact o1, OfflineableArtifact o2) {
+				StartPhase phase1 = o1.getPhase();
+				StartPhase phase2 = o2.getPhase();
+				return phase2.ordinal() - phase1.ordinal();
+			}
+		});
+		for (OfflineableArtifact artifact : artifacts) {
+			try {
+				logger.info("Taking " + artifact.getId() + " offline");
+				artifact.offline();
+				if (artifact instanceof TwoPhaseOfflineableArtifact) {
+					twoPhasers.add((TwoPhaseOfflineableArtifact) artifact);
+				}
+			}
+			catch (Exception e) {
+				logger.warn("Could not bring artifact " + artifact.getId() + " offline");
+			}
+		}
+		for (TwoPhaseOfflineableArtifact twoPhaser : twoPhasers) {
+			try {
+				logger.info("Finalizing offline sequence for: " + twoPhaser.getId());
+				twoPhaser.offlineFinish();
+			}
+			catch (Throwable e) {
+				logger.error("Could not run second phase of artifact: " + twoPhaser.getId(), e);
+			}
+		}
+	}
+	
+	public void bringOnline() {
+		logger.info("Bringing server online");
+		// check if we starting in offline modus
+		String property = System.getProperty("user.home");
+		File target = property == null ? new File(".") : new File(property);
+		if (target.exists()) {
+			File offlineFile = new File(target, "nabu.offline");
+			if (offlineFile.exists()) {
+				if (!offlineFile.delete()) {
+					logger.warn("Could not clear offline marker file, the server will remain offline");
+					throw new RuntimeException("Could not clear offline marker file, the server will remain offline");
+				}
+			}
+		}
+		offline = false;
+		List<TwoPhaseOfflineableArtifact> twoPhasers = new ArrayList<TwoPhaseOfflineableArtifact>();
+		List<OfflineableArtifact> artifacts = repository.getArtifacts(OfflineableArtifact.class);
+		artifacts.sort(new Comparator<OfflineableArtifact>() {
+			@Override
+			public int compare(OfflineableArtifact o1, OfflineableArtifact o2) {
+				StartPhase phase1 = o1.getPhase();
+				StartPhase phase2 = o2.getPhase();
+				return phase1.ordinal() - phase2.ordinal();
+			}
+		});
+		for (OfflineableArtifact artifact : artifacts) {
+			try {
+				logger.info("Bringing " + artifact.getId() + " online");
+				artifact.online();
+				if (artifact instanceof TwoPhaseOfflineableArtifact) {
+					twoPhasers.add((TwoPhaseOfflineableArtifact) artifact);
+				}
+			}
+			catch (Exception e) {
+				logger.warn("Could not bring artifact " + artifact.getId() + " offline");
+			}
+		}
+		for (TwoPhaseOfflineableArtifact twoPhaser : twoPhasers) {
+			try {
+				logger.info("Finalizing online sequence for: " + twoPhaser.getId());
+				twoPhaser.onlineFinish();
+			}
+			catch (Throwable e) {
+				logger.error("Could not run second phase of artifact: " + twoPhaser.getId(), e);
+			}
+		}
+	}
+	
+	private boolean calculateOffline() {
+		// check if we starting in offline modus
+		String property = System.getProperty("user.home");
+		File target = property == null ? new File(".") : new File(property);
+		if (target.exists() && new File(target, "nabu.offline").exists()) {
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
+	
+	public boolean isOffline() {
+		return offline;
+	}
+	
 	public void start() throws IOException {
+		this.offline = calculateOffline();
+		
 		Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
 			public void run() {
 				logger.info("Shutting down server");
