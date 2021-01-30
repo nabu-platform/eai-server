@@ -72,6 +72,7 @@ public class Standalone {
 	}
 	public void initialize(String...args) throws FileNotFoundException, IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
 		ComplexEventImpl startupEvent = new ComplexEventImpl();
+		startupEvent.setCode("STARTUP");
 		startupEvent.setEventName("nabu-server-start");
 		startupEvent.setStarted(new Date());
 		startupEvent.setCreated(startupEvent.getStarted());
@@ -274,6 +275,8 @@ public class Standalone {
 					readable.close();
 				}
 			}
+			config.getMemberAttributeConfig().setStringAttribute("group", repositoryInstance.getGroup());
+			config.getMemberAttributeConfig().setStringAttribute("name", repositoryInstance.getName());
 			config.setClassLoader(repositoryInstance.getClassLoader());
 	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
 			server.setCluster(new HazelcastClusterInstance(instance));

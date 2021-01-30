@@ -57,6 +57,7 @@ import be.nabu.libs.artifacts.api.OfflineableArtifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
 import be.nabu.libs.artifacts.api.TwoPhaseStartableArtifact;
+import be.nabu.libs.artifacts.api.TwoPhaseStoppableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact.StartPhase;
 import be.nabu.libs.artifacts.api.StoppableArtifact;
 import be.nabu.libs.artifacts.api.TwoPhaseOfflineableArtifact;
@@ -67,6 +68,8 @@ import be.nabu.libs.authentication.api.principals.BasicPrincipal;
 import be.nabu.libs.authentication.impl.BasicPrincipalImpl;
 import be.nabu.libs.cluster.api.ClusterBlockingQueue;
 import be.nabu.libs.cluster.api.ClusterInstance;
+import be.nabu.libs.cluster.api.ClusterMember;
+import be.nabu.libs.cluster.api.ClusterMembershipListener;
 import be.nabu.libs.cluster.api.ClusterMessageListener;
 import be.nabu.libs.cluster.api.ClusterTopic;
 import be.nabu.libs.events.api.EventHandler;
@@ -106,6 +109,7 @@ import be.nabu.libs.types.api.ComplexType;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.utils.aspects.AspectUtils;
+import be.nabu.utils.cep.api.EventSeverity;
 import be.nabu.utils.cep.impl.ComplexEventImpl;
 import ch.qos.logback.classic.AsyncAppender;
 import ch.qos.logback.classic.LoggerContext;
@@ -118,6 +122,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
 	public static final String SERVICE_MAX_CACHE_ENTRY_SIZE = "be.nabu.eai.server.maxCacheEntrySize";
 	
+	private Map<String, MemberState> members = new HashMap<String, MemberState>();
 	// whether or not the server is in "offline" mode (default not of course)
 	private boolean offline;
 	private MavenRepository repository;
@@ -159,6 +164,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private ComplexEventImpl startupEvent;
 	private Map<String, BatchResultFuture> futures = new HashMap<String, BatchResultFuture>();
 	private Runnable startedListener;
+	private boolean selfMonitor;
 	
 	Server(RoleHandler roleHandler, MavenRepository repository, ComplexEventImpl startupEvent) throws IOException {
 		this.roleHandler = roleHandler;
@@ -215,6 +221,67 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					}
 				}
 			});
+			
+			for (ClusterMember member : cluster.members()) {
+				registerMember(member);
+			}
+			cluster.addMembershipListener(new ClusterMembershipListener() {
+				@Override
+				public void memberRemoved(ClusterMember member) {
+					ComplexEventImpl memberEvent = new ComplexEventImpl();
+					memberEvent.setCode("MEMBER-LEFT");
+					memberEvent.setEventName("cluster-member-left");
+					memberEvent.setCreated(new Date());
+					memberEvent.setSeverity(EventSeverity.WARNING);
+					memberEvent.setTimezone(TimeZone.getDefault());
+					memberEvent.setMessage("Member left cluster: " + member.getName() + " (group: " + member.getGroup() + ")");
+					repository.getComplexEventDispatcher().fire(memberEvent, Server.this);
+					removeMember(member);
+				}
+				@Override
+				public void memberAdded(ClusterMember member) {
+					ComplexEventImpl memberEvent = new ComplexEventImpl();
+					memberEvent.setCode("MEMBER-JOINED");
+					memberEvent.setEventName("cluster-member-joined");
+					memberEvent.setCreated(new Date());
+					memberEvent.setSeverity(EventSeverity.INFO);
+					memberEvent.setTimezone(TimeZone.getDefault());
+					memberEvent.setMessage("Member joined cluster: " + member.getName() + " (group: " + member.getGroup() + ")");
+					repository.getComplexEventDispatcher().fire(memberEvent, Server.this);
+					registerMember(member);
+				}
+			});
+			
+			ClusterTopic<HeartbeatMessage> heartbeatTopic = cluster.topic("server.heartbeat");
+			heartbeatTopic.subscribe(new ClusterMessageListener<HeartbeatMessage>() {
+				@Override
+				public void onMessage(HeartbeatMessage message) {
+					try {
+						processHeartbeat(message);
+					}
+					catch (Exception e) {
+						logger.error("Could not process heartbeat", e);
+					}
+				}
+			});
+		}
+	}
+	
+	private void processHeartbeat(HeartbeatMessage message) {
+		// TODO
+	}
+	
+	private void registerMember(ClusterMember member) {
+		synchronized(members) {
+			MemberState memberState = new MemberState();
+			memberState.setName(member.getName());
+			memberState.setGroup(member.getGroup());
+			members.put(member.getName() + "@" + member.getGroup(), memberState);
+		}
+	}
+	private void removeMember(ClusterMember member) {
+		synchronized(members) {
+			members.remove(member.getName() + "@" + member.getGroup());
 		}
 	}
 	
@@ -628,12 +695,19 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								logger.error("Could not run delayed node event: " + delayedNodeEvent.getState() + " on " + delayedNodeEvent.getId(), e);
 							}
 						}
+						boolean offline = isOffline();
 						// for two phase artifacts, we wait until everything is done before doing the final phase
 						// e.g. a http server should only go live once all the applications on it are loaded
 						for (TwoPhaseStartableArtifact twoPhaser : twoPhasers) {
 							try {
-								logger.info("Finalizing " + twoPhaser.getClass().getSimpleName() + ": " + twoPhaser.getId());
-								twoPhaser.finish();
+								if (offline && twoPhaser instanceof TwoPhaseOfflineableArtifact) {
+									logger.info("Finalizing offline " + twoPhaser.getClass().getSimpleName() + ": " + twoPhaser.getId());
+									((TwoPhaseOfflineableArtifact) twoPhaser).offlineFinish();
+								}
+								else {
+									logger.info("Finalizing online " + twoPhaser.getClass().getSimpleName() + ": " + twoPhaser.getId());
+									twoPhaser.finish();
+								}
 							}
 							catch (Throwable e) {
 								logger.error("Could not run second phase of artifact: " + twoPhaser.getId(), e);
@@ -827,16 +901,18 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 	
 	private void start(StartableArtifact artifact, boolean recursive, boolean finish) {
-		logger.info("Starting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
+		boolean offline = isOffline();
 		try {
 			if (shuttingDown) {
 				throw new RuntimeException("Can't start artifact: " + artifact.getId() + " during shutdown");
 			}
 			// if we are offline, start in that modus
 			if (offline && artifact instanceof OfflineableArtifact) {
+				logger.info("Starting offline " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 				((OfflineableArtifact) artifact).startOffline();
 			}
 			else {
+				logger.info("Starting online " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 				artifact.start();
 			}
 			if (recursive) {
@@ -852,8 +928,15 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				}
 			}
 			if (finish && artifact instanceof TwoPhaseStartableArtifact) {
-				logger.info("Finalizing " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
-				((TwoPhaseStartableArtifact) artifact).finish();
+				// if we are offline, start in that modus
+				if (offline && artifact instanceof TwoPhaseOfflineableArtifact) {
+					logger.info("Finalizing offline " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
+					((TwoPhaseOfflineableArtifact) artifact).offlineFinish();
+				}
+				else {
+					logger.info("Finalizing online " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
+					((TwoPhaseStartableArtifact) artifact).finish();
+				}
 			}
 			EAIRepositoryUtils.message(repository, artifact.getId(), "start", true);
 		}
@@ -924,9 +1007,15 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 	
 	private void stop(StoppableArtifact artifact, boolean recursive) {
-		logger.info("Stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 		try {
 			if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+				// first halt
+				if (artifact instanceof TwoPhaseStoppableArtifact) {
+					logger.info("Halting " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
+					((TwoPhaseStoppableArtifact) artifact).halt();
+				}
+				// then stop
+				logger.info("Stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId());
 				artifact.stop();
 			}
 			if (recursive) {
@@ -1145,6 +1234,20 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 						return phase2.ordinal() - phase1.ordinal();
 					}
 				});
+				// first do an initial pass of all the artifacts that can can be halted before being stopped
+				for (StoppableArtifact artifact : artifacts) {
+					if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+						if (artifact instanceof TwoPhaseStoppableArtifact) {
+							logger.info("Halting " + artifact.getId());
+							try {
+								((TwoPhaseStoppableArtifact) artifact).halt();
+							}
+							catch (Exception e) {
+								logger.error("Failed to halt " + artifact.getId(), e);
+							}
+						}
+					}
+				}
 				for (StoppableArtifact artifact : artifacts) {
 					// if it is either not startable or running, stop it
 					if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
