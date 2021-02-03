@@ -24,6 +24,7 @@ import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 
 import be.nabu.eai.repository.EAIResourceRepository;
+import be.nabu.eai.repository.RepositoryThreadFactory;
 import be.nabu.eai.repository.api.LicenseManager;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
 import be.nabu.eai.repository.util.SystemPrincipal;
@@ -243,7 +244,9 @@ public class Standalone {
 		}
 		server.setDeployments(deploymentRoot);
 		server.setEnableSnapshots(enableSnapshots);
-		server.setPool(Executors.newFixedThreadPool(pool));
+		// make sure we also use the correct pool here, otherwise the thread context is wrong and we might not be able to access libraries available in the repository
+		// we had this with an invoke $all to bringOnline where startup listeners failed to for example find the sftp library, the jdbc pool artifact etc etc
+		server.setPool(Executors.newFixedThreadPool(pool, new RepositoryThreadFactory(repositoryInstance)));
 		// set the server as the runner for the repository
 		repositoryInstance.setServiceRunner(server);
 		
