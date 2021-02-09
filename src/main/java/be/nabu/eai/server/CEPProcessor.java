@@ -120,6 +120,7 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 				stopped = true;
 			}
 		});
+		thread.setContextClassLoader(server.getRepository().getClassLoader());
 		thread.setDaemon(true);
 		thread.setName("cep-processor:" + cepService);
 		thread.start();
@@ -163,9 +164,11 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 			}
 			// we have too many and apparently we can't dump 'em
 			else if (events.size() > 500) {
+				Object remove;
 				synchronized(events) {	
-					events.remove(0);
+					remove = events.remove(0);
 				}
+				logger.info("Not enough capacity for '" + cepService + "' to store event: " + remove);
 			}
 		}
 		return null;

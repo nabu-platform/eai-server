@@ -213,6 +213,8 @@ public class Standalone {
 		repositoryInstance.setHistorizationInterval(historizationInterval);
 		repositoryInstance.setHistorySize(historySize);
 		
+		repositoryInstance.addEventEnricher("correlation-id", new CorrelationIdEnricher());
+		
 		if (aliasName != null) {
 			repositoryInstance.getAliases().addAll(Arrays.asList(aliasName.split("[\\s]*,[\\s]*")));
 		}
