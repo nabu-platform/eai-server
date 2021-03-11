@@ -26,6 +26,8 @@ import com.hazelcast.core.HazelcastInstance;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.RepositoryThreadFactory;
 import be.nabu.eai.repository.api.LicenseManager;
+import be.nabu.eai.repository.impl.CorrelationIdEnricher;
+import be.nabu.eai.repository.impl.CreatedDateEnricher;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.artifacts.api.Artifact;
@@ -213,6 +215,7 @@ public class Standalone {
 		repositoryInstance.setHistorizationInterval(historizationInterval);
 		repositoryInstance.setHistorySize(historySize);
 		
+		repositoryInstance.addEventEnricher("created", new CreatedDateEnricher());
 		repositoryInstance.addEventEnricher("correlation-id", new CorrelationIdEnricher());
 		
 		if (aliasName != null) {

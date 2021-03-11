@@ -80,7 +80,9 @@ public class ServerConnection {
 		if (client == null) {
 			synchronized(this) {
 				if (Boolean.parseBoolean(System.getProperty("http.experimental.client", "true"))) {
-					client = new NIOHTTPClientImpl(context, 5, 2, 20, new EventDispatcherImpl(), new MemoryMessageDataProvider(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), Executors.defaultThreadFactory());
+					client = new NIOHTTPClientImpl(context, 10, 10, 50, new EventDispatcherImpl(), new MemoryMessageDataProvider(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), Executors.defaultThreadFactory());
+					// set it to default 5 minutes, the client default is 2 and we hit it too often with longer running services and deployments
+					((NIOHTTPClientImpl) client).setRequestTimeout(1000l * 60 * Long.parseLong(System.getProperty("http.timeout", "5")));
 				}
 				else {
 					client = new DefaultHTTPClient(new PlainConnectionHandler(context, connectionTimeout, socketTimeout), new SPIAuthenticationHandler(), new CookieManager(new CustomCookieStore(), CookiePolicy.ACCEPT_ALL), false);
