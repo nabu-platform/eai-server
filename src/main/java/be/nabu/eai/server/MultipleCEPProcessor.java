@@ -38,7 +38,7 @@ public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 		// remove any other instance of this service
 		remove(serviceId);
 		CEPProcessor cepProcessor = new CEPProcessor(server, serviceId);
-		processors.add(cepProcessor);
+		add(cepProcessor);
 		// if already started, immediately go at it!
 		if (started) {
 			cepProcessor.start();
@@ -46,7 +46,10 @@ public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 	}
 	
 	public void add(CEPProcessor processor) {
-		processors.add(processor);
+		// structured like this to avoid concurrency issues with the handle
+		List<CEPProcessor> newProcessors = new ArrayList<CEPProcessor>();
+		newProcessors.add(processor);
+		processors = newProcessors;
 	}
 	
 	public void remove(String serviceId) {
@@ -58,7 +61,7 @@ public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 	}
 	
 	public void start() {
-		for (CEPProcessor processor : processors) {
+		for (CEPProcessor processor : new ArrayList<CEPProcessor>(processors)) {
 			try {
 				processor.start();
 			}

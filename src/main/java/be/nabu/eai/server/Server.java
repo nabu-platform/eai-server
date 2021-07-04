@@ -1315,9 +1315,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		};
 		Map<String, Set<String>> allReferences = new HashMap<String, Set<String>>();
 		for (int i = 0; i < events.size(); i++) {
-			Set<String> references = new HashSet<String>();
-			getAllReferences(repository, events.get(i).getId(), new ArrayList<String>(), references);
-			allReferences.put(events.get(i).getId(), references);
+			allReferences.put(events.get(i).getId(), EAIRepositoryUtils.getAllReferences(repository, events.get(i).getId()));
 		}
 		Set<String> warnings = new HashSet<String>();
 		boolean changed = true;
@@ -1363,17 +1361,6 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			logger.warn(warning);
 		}
 //		Collections.sort(events, comparator);
-	}
-	
-	private static void getAllReferences(Repository repository, String nodeId, List<String> searchedNodes, Set<String> result) {
-		searchedNodes.add(nodeId);
-		List<String> references = repository.getReferences(nodeId);
-		result.addAll(references);
-		for (String reference : references) {
-			if (!searchedNodes.contains(reference)) {
-				getAllReferences(repository, reference, searchedNodes, result);
-			}
-		}
 	}
 	
 	private static boolean isInReferences(Repository repository, String startingNode, String searchNode, List<String> searchedNodes) {
