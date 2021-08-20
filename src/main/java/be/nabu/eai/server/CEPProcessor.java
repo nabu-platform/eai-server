@@ -30,6 +30,7 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private EventSeverity cepSeverity = EventSeverity.valueOf(System.getProperty("cepSeverity", "INFO"));
 	private boolean stopped;
+	private boolean skipOnError = true;		// if the handler can't deal, it is generally better to toss the events (they are best effort anyway) rather than keep buffering them, as they are presumed to be high volume
 
 	public CEPProcessor(Server server, String cepService) {
 		this.server = server;
@@ -90,10 +91,17 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 									}
 									
 								});
-								ComplexContent run = serviceRuntime.run(newInstance);
 								boolean handled = true;
-								if (run != null && run.getType().get("handled") != null) {
-									handled = run.get("handled") == null || (Boolean) run.get("handled");
+								try {
+									ComplexContent run = serviceRuntime.run(newInstance);
+									if (run != null && run.getType().get("handled") != null) {
+										handled = run.get("handled") == null || (Boolean) run.get("handled");
+									}
+								}
+								catch (Exception e) {
+									if (!skipOnError) {
+										throw e;
+									}
 								}
 								if (handled) {
 									synchronized(events) {

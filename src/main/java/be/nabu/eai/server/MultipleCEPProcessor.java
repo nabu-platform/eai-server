@@ -47,7 +47,7 @@ public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 	
 	public void add(CEPProcessor processor) {
 		// structured like this to avoid concurrency issues with the handle
-		List<CEPProcessor> newProcessors = new ArrayList<CEPProcessor>();
+		List<CEPProcessor> newProcessors = new ArrayList<CEPProcessor>(processors);
 		newProcessors.add(processor);
 		processors = newProcessors;
 	}
