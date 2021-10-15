@@ -544,6 +544,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			@Override
 			public Void handle(NodeEvent nodeEvent) {
 				if (nodeEvent.isDone()) {
+					logger.debug("[DONE] Receiving " + nodeEvent.getState() + " for " + nodeEvent.getId());
 					// a new node is loaded, let's check if we have to set something up
 					if (nodeEvent.getState() == NodeEvent.State.LOAD) {
 						if (StartableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
@@ -574,10 +575,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								}
 							}
 						}
-						catch (IOException e) {
-							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
-						}
-						catch (ParseException e) {
+						catch (Exception e) {
 							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
 						}
 					}
@@ -603,6 +601,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					// if a node is unloaded we might need to stop something
 					if (nodeEvent.getState() == NodeEvent.State.UNLOAD || nodeEvent.getState() == NodeEvent.State.RELOAD) {
 						try {
+							logger.debug("[ONGOING] Receiving " + nodeEvent.getState() + " for " + nodeEvent.getId());
 							// only proceed if the node is loaded
 							if (nodeEvent.getNode().isLoaded()) {
 								if (StoppableArtifact.class.isAssignableFrom(nodeEvent.getNode().getArtifactClass())) {
@@ -610,10 +609,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 								}
 							}
 						}
-						catch (IOException e) {
-							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
-						}
-						catch (ParseException e) {
+						catch (Exception e) {
 							logger.error("Failed to load artifact: " + nodeEvent.getId(), e);
 						}
 					}

@@ -26,6 +26,7 @@ import com.hazelcast.core.HazelcastInstance;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.RepositoryThreadFactory;
 import be.nabu.eai.repository.api.LicenseManager;
+import be.nabu.eai.repository.impl.AuthenticationEnricher;
 import be.nabu.eai.repository.impl.CorrelationIdEnricher;
 import be.nabu.eai.repository.impl.CreatedDateEnricher;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
@@ -217,6 +218,7 @@ public class Standalone {
 		
 		repositoryInstance.addEventEnricher("created", new CreatedDateEnricher());
 		repositoryInstance.addEventEnricher("correlation-id", new CorrelationIdEnricher());
+		repositoryInstance.addEventEnricher("authentication", new AuthenticationEnricher());
 		
 		if (aliasName != null) {
 			repositoryInstance.getAliases().addAll(Arrays.asList(aliasName.split("[\\s]*,[\\s]*")));
