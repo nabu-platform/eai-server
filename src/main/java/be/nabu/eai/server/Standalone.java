@@ -350,6 +350,10 @@ public class Standalone {
 		}
 	}
 	
+	public Server getServer() {
+		return server;
+	}
+
 	public static String getArgument(String name, String defaultValue, String...args) {
 		for (String argument : args) {
 			if (argument.startsWith(name + "=")) {

@@ -106,6 +106,9 @@ public class ServerConnection {
 		return remote;
 	}
 	
+	public void setRemote(RemoteServer remote) {
+		this.remote = remote;
+	}
 	public String getHost() {
 		return host;
 	}
