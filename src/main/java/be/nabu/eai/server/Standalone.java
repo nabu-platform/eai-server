@@ -6,8 +6,10 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
@@ -109,7 +111,26 @@ public class Standalone {
 			}
 		}
 		
-		String repositoryString = getMandatoryArgument("repository", args);
+		String repositoryString = getArgument("repository", null, args);
+		// we might not have an absolute repository position, but a relative one
+		// we often package the integrator and repository together as a runnable solution
+		// the current running directory is often not a good match for finding that location
+		// however, we can use the location of for example the jar file that contains this class as an absolute to where the lib folder is located
+		if (repositoryString == null) {
+			String relativeRepositoryString = getArgument("relativeRepository", null, args);
+			if (relativeRepositoryString == null) {
+				throw new IllegalArgumentException("Missing repository location configuration");
+			}
+			URL location = getClass().getProtectionDomain().getCodeSource().getLocation();
+			String asciiString = location.toURI().toASCIIString();
+			// it's not entirely clear if you get the path to the library itself (which I got in my tests) or the path to the class _in_ the library (which seems indicated online)
+			asciiString = asciiString.replaceAll("/lib/eai-server-[1-9.]+[\\w-]*\\.jar($|/.*)", "");
+			logger.info("Resolving relative repository to location: " + asciiString);
+			repositoryString = asciiString + "/" + relativeRepositoryString;
+			repositoryString = URIUtils.normalize(repositoryString);
+			logger.info("Final repository path: " + repositoryString);
+		}
+		
 		// if absolute path but no scheme, use file
 		if (repositoryString.startsWith("/")) {
 			repositoryString = "file:" + repositoryString;
@@ -205,6 +226,16 @@ public class Standalone {
 		String serverName = getArgument("name", null, args);
 		String groupName = getArgument("group", null, args);
 		String aliasName = getArgument("alias", null, args);
+		
+		if (serverName == null && groupName == null) {
+			throw new IllegalArgumentException("Need to provide either the server name or the group name");
+		}
+		// in auto-clusters, we do provide the group name but not the server name as the instances are not configured ad priori
+		// we generate a semi-unique yet semi-reusable server name
+		if (serverName == null && groupName != null) {
+			// the ip is semi-static and guaranteed unique within the relevant scope
+			serverName = groupName + "-" + InetAddress.getLocalHost().getHostAddress();
+		}
 		
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
