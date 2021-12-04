@@ -67,8 +67,16 @@ public class Standalone {
 			System.exit(0);
 		}
 		Standalone alone = new Standalone();
-		alone.initialize(args);
-		alone.start();
+		try {
+			logger.debug("Initializing the server...");
+			alone.initialize(args);
+			logger.debug("Starting the server...");
+			alone.start();
+		}
+		catch (Exception e) {
+			logger.error("Could not start server", e);
+			throw new RuntimeException(e);
+		}
 	}
 
 	public void start() throws IOException {
@@ -121,10 +129,7 @@ public class Standalone {
 			if (relativeRepositoryString == null) {
 				throw new IllegalArgumentException("Missing repository location configuration");
 			}
-			URL location = getClass().getProtectionDomain().getCodeSource().getLocation();
-			String asciiString = location.toURI().toASCIIString();
-			// it's not entirely clear if you get the path to the library itself (which I got in my tests) or the path to the class _in_ the library (which seems indicated online)
-			asciiString = asciiString.replaceAll("/lib/eai-server-[1-9.]+[\\w-]*\\.jar($|/.*)", "");
+			String asciiString = getIntegratorPath();
 			logger.info("Resolving relative repository to location: " + asciiString);
 			repositoryString = asciiString + "/" + relativeRepositoryString;
 			repositoryString = URIUtils.normalize(repositoryString);
@@ -137,7 +142,12 @@ public class Standalone {
 		}
 		// if no scheme and no absolute path, we assume file relative to the current directory
 		else if (!repositoryString.matches("^[\\w]+:/.*")) {
-			repositoryString = "file:" + new File(repositoryString).getCanonicalPath();
+			String asciiString = getIntegratorPath();
+			logger.info("Resolving relative repository to location: " + asciiString);
+			repositoryString = asciiString + "/" + repositoryString;
+			repositoryString = URIUtils.normalize(repositoryString);
+			logger.info("Final repository path: " + repositoryString);
+//			repositoryString = "file:" + new File(repositoryString).getCanonicalPath();
 		}
 		logger.info("Repository located at: " + repositoryString);
 		URI repository = new URI(URIUtils.encodeURI(repositoryString));
@@ -146,6 +156,7 @@ public class Standalone {
 			throw new IOException("The directory for the repository does not exist: " + repository);
 		}
 		
+		logger.debug("Starting license manager...");
 		LicenseManager licenseManager = new LicenseManagerImpl();
 		String licenseFolder = getArgument("licenses", null, args);
 		if (licenseFolder != null) {
@@ -177,11 +188,13 @@ public class Standalone {
 		ResourceContainer<?> deploymentRoot;
 		String deploymentFolder = getArgument("deployments", null, args);
 		if (deploymentFolder != null) {
+			logger.debug("Getting deployments folder: "  + deploymentFolder);
 			URI deployments = new URI(URIUtils.encodeURI(deploymentFolder));
 			deploymentRoot = ResourceUtils.mkdir(deployments, null);
 		}
 		else {
 			File file = new File("deployments");
+			logger.debug("Getting deployments folder: "  + file);
 			if (!file.exists()) {
 				file.mkdir();
 			}
@@ -190,9 +203,11 @@ public class Standalone {
 		
 		RoleHandler roleHandler = null;
 		if (getArgument("roles", null, args) != null) {
+			logger.debug("Getting role handler...");
 			roleHandler = (RoleHandler) Class.forName(getArgument("roles", null, args)).newInstance();	
 		}
 
+		logger.debug("Getting primary configuration...");
 		String cluster = getArgument("cluster", "false", args);
 		// if snapshots are disabled, deployments "can" go wrong because this happens:
 		// clean folders
@@ -237,6 +252,7 @@ public class Standalone {
 			serverName = groupName + "-" + InetAddress.getLocalHost().getHostAddress();
 		}
 		
+		logger.debug("Building repository...");
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
 		repositoryInstance.setHistorizeGauges(historizeGauges);
@@ -252,10 +268,12 @@ public class Standalone {
 		repositoryInstance.addEventEnricher("authentication", new AuthenticationEnricher());
 		
 		if (aliasName != null) {
+			logger.debug("Setting aliases: " + aliasName);
 			repositoryInstance.getAliases().addAll(Arrays.asList(aliasName.split("[\\s]*,[\\s]*")));
 		}
 
 		if (roleService != null) {
+			logger.debug("Setting role service...");
 			Artifact resolve = repositoryInstance.resolve(roleService);
 			if (resolve == null) {
 				logger.error("Invalid role service: " + roleService);
@@ -266,6 +284,7 @@ public class Standalone {
 			}
 		}
 		if (permissionService != null) {
+			logger.debug("Setting permission service...");
 			Artifact resolve = repositoryInstance.resolve(permissionService);
 			if (resolve == null) {
 				logger.error("Invalid permission service: " + permissionService);
@@ -275,6 +294,7 @@ public class Standalone {
 			}
 		}
 		
+		logger.debug("Building server...");
 		server = new Server(roleHandler, repositoryInstance, startupEvent);
 		
 		if (!startup) {
@@ -290,6 +310,7 @@ public class Standalone {
 		
 		// if it is not set to false, check if it is either true (use default settings) or points to a file
 		if (cluster != null && !cluster.equalsIgnoreCase("false")) {
+			logger.debug("Configuring clustering...");
 			
 			// hazelcast calls home once a day, it is not entirely clear _why_ but it sends information about the cluster
 			// I dislike this kind of practice out of principle so I rather disable it by default
@@ -304,6 +325,10 @@ public class Standalone {
 			}
 			// load from file system
 			else {
+				// if we don't have an absolute url, we use the installation of the integrator as point of reference
+				if (!cluster.startsWith("/") && !cluster.matches("^[\\w]+:/.*")) {
+					cluster = getIntegratorPath() + "/" + cluster;
+				}
 				Resource resolve = ResourceFactory.getInstance().resolve(new URI(URIUtils.encodeURI(cluster)), null);
 				if (resolve == null) {
 					throw new FileNotFoundException("Can not find hazelcast configuration: " + cluster);
@@ -319,6 +344,7 @@ public class Standalone {
 			config.getMemberAttributeConfig().setStringAttribute("group", repositoryInstance.getGroup());
 			config.getMemberAttributeConfig().setStringAttribute("name", repositoryInstance.getName());
 			config.setClassLoader(repositoryInstance.getClassLoader());
+			logger.debug("Creating cluster instance...");
 	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
 			server.setCluster(new HazelcastClusterInstance(instance));
 		}
@@ -329,6 +355,7 @@ public class Standalone {
 		if (logComplexEvents) {
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
 		}
+		logger.debug("Configuring event processors...");
 		MultipleCEPProcessor cepProcessor = new MultipleCEPProcessor(server);
 		server.setProcessor(cepProcessor);
 		// if we have registered one...add it (partly for backwards compatibility)
@@ -339,6 +366,7 @@ public class Standalone {
 		}
 		repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
 		
+		logger.debug("Initializing server...");
 		server.initialize();
 		
 		if (localMavenServer != null) {
@@ -348,6 +376,7 @@ public class Standalone {
 		server.setAnonymousIsRoot(anonymousIsRoot);
 		server.setListenerPoolSize(listenerPoolSize);
 		server.setPort(port);
+		logger.debug("Starting server...");
 		server.start();
 
 		String loggerService = getArgument("logger", null, args);
@@ -357,6 +386,7 @@ public class Standalone {
 		}
 
 		if (enableREST || enableMaven || enableRepository) {
+			logger.debug("Finalizing server...");
 			if (!server.enableSecurity(authenticationService)) {
 				logger.error("Could not enable security, the http server will not be started");
 				return;
@@ -379,6 +409,14 @@ public class Standalone {
 				server.enableMaven();
 			}
 		}
+	}
+
+	private String getIntegratorPath() throws URISyntaxException {
+		URL location = getClass().getProtectionDomain().getCodeSource().getLocation();
+		String asciiString = location.toURI().toASCIIString();
+		// it's not entirely clear if you get the path to the library itself (which I got in my tests) or the path to the class _in_ the library (which seems indicated online)
+		asciiString = asciiString.replaceAll("/lib/eai-server-[1-9.]+[\\w-]*\\.jar($|/.*)", "");
+		return asciiString;
 	}
 	
 	public Server getServer() {

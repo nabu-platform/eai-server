@@ -176,6 +176,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		ClusterInstance cluster = getCluster();
 		if (cluster != null) {
 			logger.info("Initializing cluster listeners");
+			// for $any
 			final ClusterBlockingQueue<ServiceExecutionTask> queue = cluster.queue("server.execute");
 			queueExecutionThread = new Thread(new Runnable() {
 				public void run() {
@@ -183,10 +184,6 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 						try {
 							ServiceExecutionTask task = queue.take();
 							Server.this.run(task);
-						}
-						catch (HazelcastInstanceNotActiveException e) {
-							logger.warn("Hazelcast is down, exiting", e);
-							break;
 						}
 						catch (Exception e) {
 							logger.error("Could not execute task", e);
@@ -196,6 +193,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			});
 			queueExecutionThread.start();
 			
+			// for $all
 			ClusterTopic<ServiceExecutionTask> topic = cluster.topic("server.execute");
 			topic.subscribe(new ClusterMessageListener<ServiceExecutionTask>() {
 				@Override
@@ -209,6 +207,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				}
 			});
 			
+			// feeding back the result
 			ClusterTopic<ServiceExecutionResult> resultTopic = cluster.topic("server.result");
 			resultTopic.subscribe(new ClusterMessageListener<ServiceExecutionResult>() {
 				@Override
@@ -225,6 +224,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			for (ClusterMember member : cluster.members()) {
 				registerMember(member);
 			}
+			
 			cluster.addMembershipListener(new ClusterMembershipListener() {
 				@Override
 				public void memberRemoved(ClusterMember member) {
@@ -232,7 +232,9 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					memberEvent.setCode("MEMBER-LEFT");
 					memberEvent.setEventName("cluster-member-left");
 					memberEvent.setCreated(new Date());
-					memberEvent.setSeverity(EventSeverity.WARNING);
+					// if this server is offline, we are assuming a maintenance window or something like it, it only trigger a warning
+					// in any other situation, we trigger an error, unless someone is pushing on the buttons, this is bad!
+					memberEvent.setSeverity(isOffline() ? EventSeverity.WARNING : EventSeverity.ERROR);
 					memberEvent.setTimezone(TimeZone.getDefault());
 					memberEvent.setMessage("Member left cluster: " + member.getName() + " (group: " + member.getGroup() + ")");
 					repository.getComplexEventDispatcher().fire(memberEvent, Server.this);
@@ -339,7 +341,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				target = intendedTarget;
 			}
 			// otherwise, check if we mean this server or this server group
-			else if (task.getTarget().equals(getName()) || task.getTarget().equals(repository.getGroup()) || (getAliases() != null && getAliases().contains(task.getTarget()))) {
+			else if (task.getTarget().equals(getName()) || task.getTarget().equals(repository.getGroup()) || (repository.getAliases() != null && repository.getAliases().contains(task.getTarget()))) {
 				target = Server.this;
 			}
 		}
