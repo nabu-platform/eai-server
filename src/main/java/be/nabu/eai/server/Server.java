@@ -1,9 +1,15 @@
 package be.nabu.eai.server;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URI;
@@ -20,6 +26,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutionException;
@@ -30,8 +37,6 @@ import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.hazelcast.core.HazelcastInstanceNotActiveException;
 
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
@@ -161,10 +166,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private CollaborationListener collaborationListener;
 	private boolean shuttingDown;
 	private MultipleCEPProcessor processor;
+	private MultipleMetricStatisticsProcessor metricsStatisticsProcessor;
 	private ComplexEventImpl startupEvent;
 	private Map<String, BatchResultFuture> futures = new HashMap<String, BatchResultFuture>();
 	private Runnable startedListener;
 	private boolean selfMonitor;
+	
+	// persisted properties for this server runtime, these allow for example for services to run only once _ever_ in a new installation
+	private Properties runtimeProperties;
 	
 	Server(RoleHandler roleHandler, MavenRepository repository, ComplexEventImpl startupEvent) throws IOException {
 		this.roleHandler = roleHandler;
@@ -229,8 +238,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				@Override
 				public void memberRemoved(ClusterMember member) {
 					ComplexEventImpl memberEvent = new ComplexEventImpl();
-					memberEvent.setCode("MEMBER-LEFT");
 					memberEvent.setEventName("cluster-member-left");
+					memberEvent.setEventCategory("server-instance");
 					memberEvent.setCreated(new Date());
 					// if this server is offline, we are assuming a maintenance window or something like it, it only trigger a warning
 					// in any other situation, we trigger an error, unless someone is pushing on the buttons, this is bad!
@@ -243,8 +252,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				@Override
 				public void memberAdded(ClusterMember member) {
 					ComplexEventImpl memberEvent = new ComplexEventImpl();
-					memberEvent.setCode("MEMBER-JOINED");
 					memberEvent.setEventName("cluster-member-joined");
+					memberEvent.setEventCategory("server-instance");
 					memberEvent.setCreated(new Date());
 					memberEvent.setSeverity(EventSeverity.INFO);
 					memberEvent.setTimezone(TimeZone.getDefault());
@@ -727,6 +736,9 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 									repository.getComplexEventDispatcher().fire(startupEvent, Server.this);
 								}
 								processor.start();
+							}
+							if (metricsStatisticsProcessor != null) {
+								metricsStatisticsProcessor.start();
 							}
 						}
 						// clear the delayed node events to free up some memory
@@ -1511,6 +1523,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		return pool;
 	}
 
+	public MultipleMetricStatisticsProcessor getMetricsStatisticsProcessor() {
+		return metricsStatisticsProcessor;
+	}
+
+	public void setMetricsStatisticsProcessor(MultipleMetricStatisticsProcessor metricsStatisticsProcessor) {
+		this.metricsStatisticsProcessor = metricsStatisticsProcessor;
+	}
+
 	public MultipleCEPProcessor getProcessor() {
 		return processor;
 	}
@@ -1525,5 +1545,62 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 
 	public void setStartedListener(Runnable startedListener) {
 		this.startedListener = startedListener;
+	}
+
+	public Properties getRuntimeProperties() {
+		if (this.runtimeProperties == null) {
+			synchronized(this) {
+				if (this.runtimeProperties == null) {
+					Properties runtimeProperties = new Properties() {
+						private static final long serialVersionUID = 1L;
+						@Override
+						public synchronized Object setProperty(String arg0, String arg1) {
+							Object setProperty = super.setProperty(arg0, arg1);
+							saveRuntimeProperties();
+							return setProperty;
+						}
+					};
+					String property = System.getProperty("user.home");
+					File target = property == null ? new File(".") : new File(property);
+					// if it is on the integrator path, it is for each new version of the server (in the single-server, multi-version deployment strategy)
+					// if it is on the home path, it will survive new versions
+//					File file = new File(Standalone.getIntegratorPath(), "runtime.properties");
+					File hidden = new File(target, ".nabu");
+					hidden.mkdirs();
+					File file = new File(hidden, "runtime.properties");
+					if (file.exists()) {
+						try {
+							try (InputStream input = new BufferedInputStream(new FileInputStream(file))) {
+								runtimeProperties.load(input);
+							}
+						}
+						catch (Exception e) {
+							logger.error("Could not load runtime properties file", e);
+						}
+					}
+					this.runtimeProperties = runtimeProperties;
+				}
+			}
+		}
+		return runtimeProperties;
+	}
+	
+	private void saveRuntimeProperties() {
+		// check if we starting in offline modus
+		String property = System.getProperty("user.home");
+		File target = property == null ? new File(".") : new File(property);
+		Properties runtimeProperties = getRuntimeProperties();
+//		File file = new File(Standalone.getIntegratorPath(), "runtime.properties");
+		File hidden = new File(target, ".nabu");
+		hidden.mkdirs();
+		File file = new File(hidden, "runtime.properties");
+		try {
+			try (OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
+				runtimeProperties.store(output, null);
+			}
+		}
+		catch (Exception e) {
+			logger.error("Could not save runtime properties file", e);
+		}
 	}
 }

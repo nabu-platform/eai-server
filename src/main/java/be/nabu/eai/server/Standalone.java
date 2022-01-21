@@ -32,6 +32,7 @@ import be.nabu.eai.repository.impl.AuthenticationEnricher;
 import be.nabu.eai.repository.impl.CorrelationIdEnricher;
 import be.nabu.eai.repository.impl.CreatedDateEnricher;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
+import be.nabu.eai.repository.util.MetricStatistics;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.api.PermissionHandler;
@@ -252,7 +253,7 @@ public class Standalone {
 			serverName = groupName + "-" + InetAddress.getLocalHost().getHostAddress();
 		}
 		
-		logger.debug("Building repository...");
+		logger.debug("Building repository...(snapshots: " + enableSnapshots + ")");
 		// create the repository
 		EAIResourceRepository repositoryInstance = new EAIResourceRepository(enableSnapshots ? SnapshotUtils.prepare(repositoryRoot) : repositoryRoot, mavenRoot);
 		repositoryInstance.setHistorizeGauges(historizeGauges);
@@ -366,6 +367,10 @@ public class Standalone {
 		}
 		repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
 		
+		MultipleMetricStatisticsProcessor metricProcessor = new MultipleMetricStatisticsProcessor(server);
+		server.setMetricsStatisticsProcessor(metricProcessor);
+		repositoryInstance.getMetricsDispatcher().subscribe(MetricStatistics.class, metricProcessor);
+		
 		logger.debug("Initializing server...");
 		server.initialize();
 		
@@ -411,12 +416,17 @@ public class Standalone {
 		}
 	}
 
-	private String getIntegratorPath() throws URISyntaxException {
-		URL location = getClass().getProtectionDomain().getCodeSource().getLocation();
-		String asciiString = location.toURI().toASCIIString();
-		// it's not entirely clear if you get the path to the library itself (which I got in my tests) or the path to the class _in_ the library (which seems indicated online)
-		asciiString = asciiString.replaceAll("/lib/eai-server-[1-9.]+[\\w-]*\\.jar($|/.*)", "");
-		return asciiString;
+	public static String getIntegratorPath() {
+		try {
+			URL location = Standalone.class.getProtectionDomain().getCodeSource().getLocation();
+			String asciiString = location.toURI().toASCIIString();
+			// it's not entirely clear if you get the path to the library itself (which I got in my tests) or the path to the class _in_ the library (which seems indicated online)
+			asciiString = asciiString.replaceAll("/lib/eai-server-[1-9.]+[\\w-]*\\.jar($|/.*)", "");
+			return asciiString;
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 	
 	public Server getServer() {
