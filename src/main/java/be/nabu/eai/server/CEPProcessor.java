@@ -103,9 +103,11 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 										throw e;
 									}
 								}
-								if (handled) {
-									synchronized(events) {
-										events.removeAll(eventsToProcess);
+								finally {
+									if (handled) {
+										synchronized(events) {
+											events.removeAll(eventsToProcess);
+										}
 									}
 								}
 							}
@@ -171,7 +173,7 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 				thread.interrupt();
 			}
 			// we have too many and apparently we can't dump 'em
-			else if (events.size() > 500) {
+			if (events.size() > 500) {
 				Object remove;
 				synchronized(events) {	
 					remove = events.remove(0);

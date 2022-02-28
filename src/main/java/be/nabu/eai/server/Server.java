@@ -31,7 +31,9 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -172,6 +174,9 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private Runnable startedListener;
 	private boolean selfMonitor;
 	
+	private String imageName, imageVersion, imageEnvironment;
+	private Date imageDate;
+	
 	// persisted properties for this server runtime, these allow for example for services to run only once _ever_ in a new installation
 	private Properties runtimeProperties;
 	
@@ -192,6 +197,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					while (true) {
 						try {
 							ServiceExecutionTask task = queue.take();
+							logger.info("Executing task: " + task.getServiceId());
 							Server.this.run(task);
 						}
 						catch (Exception e) {
@@ -200,6 +206,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					}
 				}
 			});
+			queueExecutionThread.setName("cluster-service-executor");
 			queueExecutionThread.start();
 			
 			// for $all
@@ -1441,7 +1448,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		if (httpServer == null) {
 			synchronized(this) {
 				if (httpServer == null) {
-					httpServer = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl());
+					httpServer = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl(), new ThreadFactory() {
+						@Override
+						public Thread newThread(Runnable r) {
+							Thread newThread = Executors.defaultThreadFactory().newThread(r);
+							newThread.setName("nabu-main-server");
+							return newThread;
+						}
+					});
 					httpServer.setMessageDataProvider(new RoutingMessageDataProvider());
 					if (Boolean.parseBoolean(System.getProperty("server.encode", "true"))) {
 						httpServer.getDispatcher().subscribe(HTTPResponse.class, HTTPServerUtils.ensureContentEncoding());
@@ -1603,4 +1617,37 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			logger.error("Could not save runtime properties file", e);
 		}
 	}
+
+	public String getImageName() {
+		return imageName;
+	}
+
+	public void setImageName(String imageName) {
+		this.imageName = imageName;
+	}
+
+	public String getImageVersion() {
+		return imageVersion;
+	}
+
+	public void setImageVersion(String imageVersion) {
+		this.imageVersion = imageVersion;
+	}
+
+	public String getImageEnvironment() {
+		return imageEnvironment;
+	}
+
+	public void setImageEnvironment(String imageEnvironment) {
+		this.imageEnvironment = imageEnvironment;
+	}
+
+	public Date getImageDate() {
+		return imageDate;
+	}
+
+	public void setImageDate(Date imageDate) {
+		this.imageDate = imageDate;
+	}
+	
 }

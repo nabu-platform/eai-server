@@ -100,9 +100,11 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 										throw e;
 									}
 								}
-								if (handled) {
-									synchronized(metrics) {
-										metrics.removeAll(metricsToProcess);
+								finally {
+									if (handled) {
+										synchronized(metrics) {
+											metrics.removeAll(metricsToProcess);
+										}
 									}
 								}
 							}
@@ -154,7 +156,7 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 				thread.interrupt();
 			}
 			// we have too many and apparently we can't dump 'em
-			else if (metrics.size() > 500) {
+			if (metrics.size() > 500) {
 				Object remove;
 				synchronized(metrics) {	
 					remove = metrics.remove(0);

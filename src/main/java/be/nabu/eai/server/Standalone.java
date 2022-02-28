@@ -10,11 +10,13 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
@@ -40,6 +42,7 @@ import be.nabu.libs.authentication.api.RoleHandler;
 import be.nabu.libs.cluster.hazelcast.HazelcastClusterInstance;
 import be.nabu.libs.cluster.local.LocalInstance;
 import be.nabu.libs.resources.ResourceFactory;
+import be.nabu.libs.resources.ResourceReadableContainer;
 import be.nabu.libs.resources.ResourceUtils;
 import be.nabu.libs.resources.URIUtils;
 import be.nabu.libs.resources.alias.AliasResourceResolver;
@@ -157,6 +160,42 @@ public class Standalone {
 			throw new IOException("The directory for the repository does not exist: " + repository);
 		}
 		
+		String releaseFile = repositoryString.replaceAll("(.*/)[^/]+$", "$1release.xml");
+		URI releaseUri = new URI(URIUtils.encodeURI(releaseFile));
+		Resource releaseResource = ResourceFactory.getInstance().resolve(releaseUri, null);
+		String imageName = null;
+		String imageVersion = null;
+		String imageEnvironment = null;
+		Date imageDate = null;
+		// if we have a release file, check it
+		if (releaseResource instanceof ReadableResource) {
+			ResourceReadableContainer resourceReadableContainer = new ResourceReadableContainer((ReadableResource) releaseResource);
+			try {
+				String releaseContent = new String(IOUtils.toBytes(resourceReadableContainer), "UTF-8");
+				imageName = releaseContent.replaceAll("(?s).*<image>(.*?)</image>.*", "$1");
+				imageVersion = releaseContent.replaceAll("(?s).*<version>(.*?)</version>.*", "$1");
+				imageEnvironment = releaseContent.replaceAll("(?s).*<environment>(.*?)</environment>.*", "$1");
+				String date = releaseContent.replaceAll("(?s).*<created>(.*?)</created>.*", "$1");
+				// quick check to see we didn't get the whole xml
+				if (!date.startsWith("<")) {
+					SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS");
+					formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+					try {
+						imageDate = formatter.parse(date);
+					}
+					catch (Exception e) {
+						logger.warn("Could not parse release date", e);
+					}
+				}
+			}
+			finally {
+				resourceReadableContainer.close();
+			}
+		}
+		else {
+			logger.info("No release file found");
+		}
+		
 		logger.debug("Starting license manager...");
 		LicenseManager licenseManager = new LicenseManagerImpl();
 		String licenseFolder = getArgument("licenses", null, args);
@@ -243,6 +282,10 @@ public class Standalone {
 		String groupName = getArgument("group", null, args);
 		String aliasName = getArgument("alias", null, args);
 		
+		if (groupName == null && imageName != null && imageEnvironment != null) {
+			groupName = imageName + "-" + imageEnvironment;
+		}
+		
 		if (serverName == null && groupName == null) {
 			throw new IllegalArgumentException("Need to provide either the server name or the group name");
 		}
@@ -298,6 +341,11 @@ public class Standalone {
 		logger.debug("Building server...");
 		server = new Server(roleHandler, repositoryInstance, startupEvent);
 		
+		server.setImageEnvironment(imageEnvironment);
+		server.setImageName(imageName);
+		server.setImageVersion(imageVersion);
+		server.setImageDate(imageDate);
+		
 		if (!startup) {
 			server.setDisableStartup(true);
 		}
@@ -342,8 +390,12 @@ public class Standalone {
 					readable.close();
 				}
 			}
+			// hazelcast 3.12
 			config.getMemberAttributeConfig().setStringAttribute("group", repositoryInstance.getGroup());
 			config.getMemberAttributeConfig().setStringAttribute("name", repositoryInstance.getName());
+			// hazelcast 4.2.4
+//			config.getMemberAttributeConfig().setAttribute("group", repositoryInstance.getGroup());
+//			config.getMemberAttributeConfig().setAttribute("name", repositoryInstance.getName());
 			config.setClassLoader(repositoryInstance.getClassLoader());
 			logger.debug("Creating cluster instance...");
 	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
