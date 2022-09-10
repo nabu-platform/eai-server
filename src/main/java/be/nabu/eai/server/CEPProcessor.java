@@ -1,6 +1,7 @@
 package be.nabu.eai.server;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -22,6 +23,8 @@ import be.nabu.utils.cep.api.EventSeverity;
 
 public class CEPProcessor implements EventHandler<Object, Void> {
 
+	private static final int POLL_INTERVAL = 5000;
+	private static final int INTERRUPT_INTERVAL = 1000;
 	private Server server;
 	private String cepService;
 	private DefinedService service;
@@ -31,7 +34,11 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 	private EventSeverity cepSeverity = EventSeverity.valueOf(System.getProperty("cepSeverity", "INFO"));
 	private boolean stopped;
 	private boolean skipOnError = true;		// if the handler can't deal, it is generally better to toss the events (they are best effort anyway) rather than keep buffering them, as they are presumed to be high volume
-
+	// we want to keep track of the last time we interrupted
+	// if we are getting a lot of pushes and stay over 500, perhaps we can't process at all (e.g. websocket down)
+	// if we keep interrupting the thread, we are wasting a lot of CPU cycles 
+	private Date lastInterrupted;
+	
 	public CEPProcessor(Server server, String cepService) {
 		this.server = server;
 		this.cepService = cepService;
@@ -121,7 +128,7 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 						logger.error("Could not process complex events", e);
 					}
 					try {
-						Thread.sleep(5000);
+						Thread.sleep(POLL_INTERVAL);
 					}
 					catch (InterruptedException e) {
 						// ignore
@@ -170,7 +177,11 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 			}
 			// if it is getting too much, interrupt the thread for processing (if applicable)
 			if (events.size() > 50 && thread != null) {
-				thread.interrupt();
+				Date interrupted = new Date();
+				if (lastInterrupted == null || lastInterrupted.getTime() < interrupted.getTime() - INTERRUPT_INTERVAL) {
+					lastInterrupted = interrupted;
+					thread.interrupt();
+				}
 			}
 			// we have too many and apparently we can't dump 'em
 			if (events.size() > 500) {

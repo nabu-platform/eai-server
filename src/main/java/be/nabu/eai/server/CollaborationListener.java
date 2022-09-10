@@ -2,11 +2,19 @@ package be.nabu.eai.server;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.OperatingSystemMXBean;
+import java.lang.management.RuntimeMXBean;
 import java.nio.charset.Charset;
+import java.nio.file.FileStore;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 
 import javax.xml.bind.JAXBContext;
@@ -19,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.repository.Notification;
 import be.nabu.eai.repository.events.ResourceEvent;
+import be.nabu.eai.server.ServerStatistics.ServerStatistic;
 import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.events.api.EventSubscription;
@@ -35,6 +44,7 @@ import be.nabu.libs.http.server.websockets.WebSocketUtils;
 import be.nabu.libs.http.server.websockets.api.WebSocketMessage;
 import be.nabu.libs.http.server.websockets.api.WebSocketRequest;
 import be.nabu.libs.http.server.websockets.impl.WebSocketRequestParserFactory;
+import be.nabu.libs.metrics.impl.SystemMetrics;
 import be.nabu.libs.nio.PipelineUtils;
 import be.nabu.libs.nio.api.Pipeline;
 import be.nabu.libs.nio.api.StandardizedMessagePipeline;
@@ -50,6 +60,7 @@ public class CollaborationListener {
 	
 	private Server server;
 	private Logger logger = LoggerFactory.getLogger(getClass());
+	private boolean broadcastStatistics = true;
 
 	public CollaborationListener(Server server) {
 		this.server = server;
@@ -113,6 +124,56 @@ public class CollaborationListener {
 			}
 		});
 		
+		final List<FileStore> filestores = SystemMetrics.filestores();
+		final MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
+		final OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
+		// push server statistics to the developers
+		Thread statisticsThread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				while (broadcastStatistics) {
+					List<User> users = getUsers();
+					if (users != null && !users.isEmpty()) {
+						ServerStatistics statistics = new ServerStatistics();
+						statistics.setUsers(users);
+						
+						Date date = new Date();
+						List<ServerStatistic> metrics = new ArrayList<ServerStatistic>();
+						metrics.add(new ServerStatistic("runtime", "load", date.getTime(), ((operatingSystemMXBean.getSystemLoadAverage() / operatingSystemMXBean.getAvailableProcessors()) * 100)));
+						
+						MemoryUsage heapMemoryUsage = memoryMXBean.getHeapMemoryUsage();
+						metrics.add(new ServerStatistic("memory", "heap", date.getTime(), ((100.0 * heapMemoryUsage.getUsed()) / heapMemoryUsage.getMax())));
+						
+//						MemoryUsage nonHeapMemoryUsage = memoryMXBean.getNonHeapMemoryUsage();
+//						metrics.add(new ServerStatistic("memory", "nonHeap", date.getTime(), ((100.0 * nonHeapMemoryUsage.getUsed()) / nonHeapMemoryUsage.getMax())));
+						
+						for (FileStore store : filestores) {
+							try {
+								
+								metrics.add(new ServerStatistic("file", store.name(), date.getTime(), (((1.0 * (store.getTotalSpace() - store.getUsableSpace())) / store.getTotalSpace()) * 100)));
+							}
+							catch (IOException e) {
+								logger.warn("Can't read file statistics for " + store.name(), e);
+							}
+						}
+						statistics.setStatistics(metrics);
+						
+						CollaborationMessage message = new CollaborationMessage(CollaborationMessageType.STATISTICS, marshal(statistics));
+						broadcast(WebSocketUtils.newMessage(marshal(message)), Arrays.asList());
+						
+					}
+					try {
+						Thread.sleep(10000l);
+					}
+					catch (InterruptedException e) {
+						continue; 
+					}
+				}
+			}
+		});
+		statisticsThread.setDaemon(true);
+		statisticsThread.setName("developer-statistics");
+		
 		server.getHTTPServer().getDispatcher().subscribe(ConnectionEvent.class, new EventHandler<ConnectionEvent, Void>() {
 			@SuppressWarnings("unchecked")
 			@Override
@@ -126,6 +187,17 @@ public class CollaborationListener {
 							: new CollaborationMessage(CollaborationMessageType.LEAVE, "Disconnected");
 						content.setAlias(token == null ? null : token.getName());
 						broadcast(WebSocketUtils.newMessage(marshal(content)), Arrays.asList(event.getPipeline()));
+						
+						if (ConnectionState.UPGRADED.equals(event.getState())) {
+							// we only start the thread once at least one developer connects
+							if (statisticsThread.getState() == Thread.State.NEW) {
+								statisticsThread.start();
+							}
+							// let's send a first status
+							else {
+								statisticsThread.interrupt();
+							}
+						}
 					}
 				}
 				return null;
@@ -147,6 +219,7 @@ public class CollaborationListener {
 				return null;
 			}
 		});
+		
 		
 		// not enabled yet
 //		server.getRepository().getComplexEventDispatcher().subscribe(Object.class, new EventHandler<Object, Void>() {
@@ -192,6 +265,13 @@ public class CollaborationListener {
 	}
 	
 	public WebSocketMessage newUserList() {
+		List<User> users = getUsers();
+		UserList userList = new UserList();
+		userList.setUsers(users);
+		return WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.USERS, marshal(userList))));
+	}
+
+	private List<User> getUsers() {
 		List<StandardizedMessagePipeline<WebSocketRequest, WebSocketMessage>> pipelines = WebSocketUtils.getWebsocketPipelines((NIOHTTPServer) server.getHTTPServer(), "/collaborate");
 		List<User> users = new ArrayList<User>();
 		for (StandardizedMessagePipeline<WebSocketRequest, WebSocketMessage> pipeline : pipelines) {
@@ -201,9 +281,7 @@ public class CollaborationListener {
 			users.add(user);
 		}
 		Collections.sort(users);
-		UserList userList = new UserList();
-		userList.setUsers(users);
-		return WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.USERS, marshal(userList))));
+		return users;
 	}
 	
 	public static byte [] marshalComplex(ComplexContent content) {
@@ -252,7 +330,7 @@ public class CollaborationListener {
 	}
 
 	public enum CollaborationMessageType {
-		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE, LOG, LOCKS, NOTIFICATION, REQUEST_LOCK, EVENT
+		PING, PONG, HELLO, USERS, UPDATE, DELETE, CREATE, LOCK, UNLOCK, JOIN, LEAVE, LOG, LOCKS, NOTIFICATION, REQUEST_LOCK, EVENT, STATISTICS
 	}
 	
 	@XmlRootElement

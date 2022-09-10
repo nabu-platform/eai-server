@@ -341,6 +341,8 @@ public class Standalone {
 		logger.debug("Building server...");
 		server = new Server(roleHandler, repositoryInstance, startupEvent);
 		
+		// register this shutdown hook _before_ hazelcast, otherwise we can't correctly wind down hazelcast-based artifacts
+		server.addShutdownHook();
 		server.setImageEnvironment(imageEnvironment);
 		server.setImageName(imageName);
 		server.setImageVersion(imageVersion);
@@ -390,6 +392,9 @@ public class Standalone {
 					readable.close();
 				}
 			}
+			// we will shut it down ourselves to cleanly combine with our own shutdown routines
+			config.setProperty("hazelcast.shutdownhook.enabled", "false");
+			
 			// hazelcast 3.12
 			config.getMemberAttributeConfig().setStringAttribute("group", repositoryInstance.getGroup());
 			config.getMemberAttributeConfig().setStringAttribute("name", repositoryInstance.getName());
@@ -400,6 +405,13 @@ public class Standalone {
 			logger.debug("Creating cluster instance...");
 	        HazelcastInstance instance = Hazelcast.newHazelcastInstance(config);
 			server.setCluster(new HazelcastClusterInstance(instance));
+			server.addShutdownAction(new Runnable() {
+				@Override
+				public void run() {
+					logger.info("Shutting down hazelcast");
+					instance.shutdown();
+				}
+			});
 		}
 		else {
 			server.setCluster(new LocalInstance());

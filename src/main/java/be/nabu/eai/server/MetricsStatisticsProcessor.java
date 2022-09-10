@@ -1,6 +1,7 @@
 package be.nabu.eai.server;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -21,6 +22,8 @@ import be.nabu.libs.types.api.ComplexContent;
 
 public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics, Void> {
 
+	private static final int POLL_INTERVAL = 5000;
+	private static final int INTERRUPT_INTERVAL = 1000;
 	private Server server;
 	private String metricService;
 	private DefinedService service;
@@ -28,7 +31,11 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 	private List<MetricStatistics> metrics = new ArrayList<MetricStatistics>();
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private boolean stopped;
-	private boolean skipOnError = true;		// if the handler can't deal, it is generally better to toss the events (they are best effort anyway) rather than keep buffering them, as they are presumed to be high volume
+	private boolean skipOnError = true;		// if the handler can't deal, it is generally better to toss the metrics (they are best effort anyway) rather than keep buffering them, as they are presumed to be high volume
+	// we want to keep track of the last time we interrupted
+	// if we are getting a lot of pushes and stay over 500, perhaps we can't process at all (e.g. websocket down)
+	// if we keep interrupting the thread, we are wasting a lot of CPU cycles 
+	private Date lastInterrupted;
 
 	public MetricsStatisticsProcessor(Server server, String metricService) {
 		this.server = server;
@@ -118,7 +125,7 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 						logger.error("Could not process complex events", e);
 					}
 					try {
-						Thread.sleep(5000);
+						Thread.sleep(POLL_INTERVAL);
 					}
 					catch (InterruptedException e) {
 						// ignore
@@ -153,7 +160,11 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 			}
 			// if it is getting too much, interrupt the thread for processing (if applicable)
 			if (metrics.size() > 50 && thread != null) {
-				thread.interrupt();
+				Date interrupted = new Date();
+				if (lastInterrupted == null || lastInterrupted.getTime() < interrupted.getTime() - INTERRUPT_INTERVAL) {
+					lastInterrupted = interrupted;
+					thread.interrupt();
+				}
 			}
 			// we have too many and apparently we can't dump 'em
 			if (metrics.size() > 500) {

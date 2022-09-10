@@ -174,6 +174,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private Runnable startedListener;
 	private boolean selfMonitor;
 	
+	private List<Runnable> shutdownActions = new ArrayList<Runnable>();
+	
 	private String imageName, imageVersion, imageEnvironment;
 	private Date imageDate;
 	
@@ -194,14 +196,17 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			final ClusterBlockingQueue<ServiceExecutionTask> queue = cluster.queue("server.execute");
 			queueExecutionThread = new Thread(new Runnable() {
 				public void run() {
-					while (true) {
+					while (!shuttingDown) {
 						try {
 							ServiceExecutionTask task = queue.take();
 							logger.info("Executing task: " + task.getServiceId());
 							Server.this.run(task);
 						}
 						catch (Exception e) {
-							logger.error("Could not execute task", e);
+							// during shutdown we can no longer get tasks from the queue
+							if (!shuttingDown) {
+								logger.error("Could not execute task", e);
+							}
 						}
 					}
 				}
@@ -1237,48 +1242,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public void start() throws IOException {
 		this.offline = calculateOffline();
 		
-		Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-			public void run() {
-				logger.info("Shutting down server");
-				shuttingDown = true;
-				List<StoppableArtifact> artifacts = repository.getArtifacts(StoppableArtifact.class);
-				// we want to reverse sort them, if they had to start late, they have to be shut down first
-				artifacts.sort(new Comparator<StoppableArtifact>() {
-					@Override
-					public int compare(StoppableArtifact o1, StoppableArtifact o2) {
-						StartPhase phase1 = o1 instanceof StartableArtifact ? ((StartableArtifact) o1).getPhase() : StartPhase.NORMAL;
-						StartPhase phase2 = o2 instanceof StartableArtifact ? ((StartableArtifact) o2).getPhase() : StartPhase.NORMAL;
-						return phase2.ordinal() - phase1.ordinal();
-					}
-				});
-				// first do an initial pass of all the artifacts that can can be halted before being stopped
-				for (StoppableArtifact artifact : artifacts) {
-					if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
-						if (artifact instanceof TwoPhaseStoppableArtifact) {
-							logger.info("Halting " + artifact.getId());
-							try {
-								((TwoPhaseStoppableArtifact) artifact).halt();
-							}
-							catch (Exception e) {
-								logger.error("Failed to halt " + artifact.getId(), e);
-							}
-						}
-					}
-				}
-				for (StoppableArtifact artifact : artifacts) {
-					// if it is either not startable or running, stop it
-					if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
-						logger.info("Stopping " + artifact.getId());
-						try {
-							artifact.stop();
-						}
-						catch (Exception e) {
-							logger.error("Failed to shut down " + artifact.getId(), e);
-						}
-					}
-				}
-			}
-		}));
+//		addShutdownHook();
 		
 		startupTime = new Date();
 		Thread.currentThread().setContextClassLoader(repository.getClassLoader());
@@ -1294,6 +1258,65 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		if (startedListener != null) {
 			startedListener.run();
 		}
+	}
+
+	public void addShutdownHook() {
+		Thread hook = new Thread(new Runnable() {
+			public void run() {
+				// only execute if we actually started the server
+				if (startupTime != null) {
+					logger.info("Shutting down server");
+					shuttingDown = true;
+					List<StoppableArtifact> artifacts = repository.getArtifacts(StoppableArtifact.class);
+					// we want to reverse sort them, if they had to start late, they have to be shut down first
+					artifacts.sort(new Comparator<StoppableArtifact>() {
+						@Override
+						public int compare(StoppableArtifact o1, StoppableArtifact o2) {
+							StartPhase phase1 = o1 instanceof StartableArtifact ? ((StartableArtifact) o1).getPhase() : StartPhase.NORMAL;
+							StartPhase phase2 = o2 instanceof StartableArtifact ? ((StartableArtifact) o2).getPhase() : StartPhase.NORMAL;
+							return phase2.ordinal() - phase1.ordinal();
+						}
+					});
+					// first do an initial pass of all the artifacts that can can be halted before being stopped
+					for (StoppableArtifact artifact : artifacts) {
+						if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+							if (artifact instanceof TwoPhaseStoppableArtifact) {
+								logger.info("Halting " + artifact.getId());
+								try {
+									((TwoPhaseStoppableArtifact) artifact).halt();
+								}
+								catch (Exception e) {
+									logger.error("Failed to halt " + artifact.getId(), e);
+								}
+							}
+						}
+					}
+					for (StoppableArtifact artifact : artifacts) {
+						// if it is either not startable or running, stop it
+						if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
+							logger.info("Stopping " + artifact.getId());
+							try {
+								artifact.stop();
+							}
+							catch (Exception e) {
+								logger.error("Failed to shut down " + artifact.getId(), e);
+							}
+						}
+					}
+				}
+				// now the server is wound down correctly, run any remaining shutdown actions
+				for (Runnable shutdownAction : shutdownActions) {
+					try {
+						shutdownAction.run();
+					}
+					catch (Exception e) {
+						logger.warn("Could not run shutdown action", e);
+					}
+				}
+			}
+		});
+		hook.setName("nabu-shutdown");
+		Runtime.getRuntime().addShutdownHook(hook);
 	}
 	
 	public URI getRepositoryRoot() {
@@ -1648,6 +1671,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 
 	public void setImageDate(Date imageDate) {
 		this.imageDate = imageDate;
+	}
+	
+	public void addShutdownAction(Runnable runnable) {
+		shutdownActions.add(runnable);
 	}
 	
 }
