@@ -94,6 +94,12 @@ public class ServerREST {
 		repository.reload(id);
 		reloadClosestParent(id);
 	}
+	
+	@Path("/gc")
+	@GET
+	public void gc() {
+		Runtime.getRuntime().gc();
+	}
 
 	private void reloadClosestParent(String id) {
 		// we want to reload the resources of the closest parent that exists
