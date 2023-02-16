@@ -12,11 +12,11 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 	private List<MetricsStatisticsProcessor> processors = new ArrayList<MetricsStatisticsProcessor>();
 	private Server server;
 	private boolean started;
-	
+
 	public MultipleMetricStatisticsProcessor(Server server) {
 		this.server = server;
 	}
-	
+
 	@Override
 	public Void handle(MetricStatistics event) {
 		Iterator<MetricsStatisticsProcessor> iterator = processors.iterator();
@@ -27,8 +27,7 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 				if (processor.isStopped()) {
 					iterator.remove();
 				}
-			}
-			catch (Exception e) {
+			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
@@ -45,14 +44,14 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 			metricProcessor.start();
 		}
 	}
-	
+
 	public void add(MetricsStatisticsProcessor processor) {
 		// structured like this to avoid concurrency issues with the handle
 		List<MetricsStatisticsProcessor> newProcessors = new ArrayList<MetricsStatisticsProcessor>(processors);
 		newProcessors.add(processor);
 		processors = newProcessors;
 	}
-	
+
 	public void remove(String serviceId) {
 		for (MetricsStatisticsProcessor processor : new ArrayList<MetricsStatisticsProcessor>(processors)) {
 			if (processor.getServiceId().equals(serviceId)) {
@@ -60,13 +59,12 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 			}
 		}
 	}
-	
+
 	public void start() {
 		for (MetricsStatisticsProcessor processor : new ArrayList<MetricsStatisticsProcessor>(processors)) {
 			try {
 				processor.start();
-			}
-			catch (Exception e) {
+			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
@@ -76,5 +74,5 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 	public List<MetricsStatisticsProcessor> getProcessors() {
 		return processors;
 	}
-	
+
 }

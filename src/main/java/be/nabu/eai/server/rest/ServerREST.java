@@ -308,7 +308,7 @@ public class ServerREST {
 	@GET
 	@Path("/settings/version")
 	public String getVersion() {
-		return "Faraday Fox: 6.1-SNAPSHOT";
+		return "Graph Gopher: 7.0-SNAPSHOT";
 	}
 	
 	@GET

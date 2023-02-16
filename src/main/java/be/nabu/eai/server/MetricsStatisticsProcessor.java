@@ -122,7 +122,7 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 						}
 					}
 					catch (Exception e) {
-						logger.error("Could not process complex events", e);
+						logger.error("Could not process metrics", e);
 					}
 					try {
 						Thread.sleep(POLL_INTERVAL);
