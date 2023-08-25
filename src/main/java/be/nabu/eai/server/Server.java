@@ -192,6 +192,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		ClusterInstance cluster = getCluster();
 		if (cluster != null) {
 			logger.info("Initializing cluster listeners");
+			
+			logger.debug("Subscribing to $any execution");
 			// for $any
 			final ClusterBlockingQueue<ServiceExecutionTask> queue = cluster.queue("server.execute");
 			queueExecutionThread = new Thread(new Runnable() {
@@ -214,6 +216,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			queueExecutionThread.setName("cluster-service-executor");
 			queueExecutionThread.start();
 			
+			logger.debug("Subscribing to $all execution");
 			// for $all
 			ClusterTopic<ServiceExecutionTask> topic = cluster.topic("server.execute");
 			topic.subscribe(new ClusterMessageListener<ServiceExecutionTask>() {
@@ -228,6 +231,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				}
 			});
 			
+			logger.debug("Subscribing to result feedback");
 			// feeding back the result
 			ClusterTopic<ServiceExecutionResult> resultTopic = cluster.topic("server.result");
 			resultTopic.subscribe(new ClusterMessageListener<ServiceExecutionResult>() {
@@ -242,6 +246,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				}
 			});
 			
+			logger.debug("Registering cluster members");
 			for (ClusterMember member : cluster.members()) {
 				registerMember(member);
 			}
@@ -275,6 +280,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 				}
 			});
 			
+			logger.debug("Subscribing to heartbeat messages");
 			ClusterTopic<HeartbeatMessage> heartbeatTopic = cluster.topic("server.heartbeat");
 			heartbeatTopic.subscribe(new ClusterMessageListener<HeartbeatMessage>() {
 				@Override
@@ -295,6 +301,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 	
 	private void registerMember(ClusterMember member) {
+		logger.debug("Registering cluster member: " + member.getName());
 		synchronized(members) {
 			MemberState memberState = new MemberState();
 			memberState.setName(member.getName());
@@ -303,6 +310,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		}
 	}
 	private void removeMember(ClusterMember member) {
+		logger.debug("Removing cluster member: " + member.getName());
 		synchronized(members) {
 			members.remove(member.getName() + "@" + member.getGroup());
 		}
@@ -747,9 +755,11 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 									startupEvent.setTimezone(TimeZone.getDefault());
 									repository.getComplexEventDispatcher().fire(startupEvent, Server.this);
 								}
+								logger.info("Starting complex event processor");
 								processor.start();
 							}
 							if (metricsStatisticsProcessor != null) {
+								logger.info("Starting metrics processor");
 								metricsStatisticsProcessor.start();
 							}
 						}
@@ -1248,14 +1258,17 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		Thread.currentThread().setContextClassLoader(repository.getClassLoader());
 		repository.start();
 		
+		logger.info("Starting " + serverListeners.size() + " HTTP server listeners");
 		// everything should be up and running
 		for (ServerListener serverListener : serverListeners) {
+			logger.debug("Starting HTTP listener: " + serverListener);
 			if (serverListener.getPhase() == Phase.ARTIFACTS_STARTED) {
 				serverListener.listen(Server.this, getHTTPServer());
 			}
 		}
 		
 		if (startedListener != null) {
+			logger.info("Running the final started listener");
 			startedListener.run();
 		}
 	}
