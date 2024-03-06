@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import be.nabu.eai.authentication.api.PasswordAuthenticator;
 import be.nabu.eai.repository.EAIRepositoryUtils;
+import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.ClusteredServer;
 import be.nabu.eai.repository.api.ExecutorServiceProvider;
 import be.nabu.eai.repository.api.MavenRepository;
@@ -458,7 +459,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 
 	public int getPort() {
-		return port;
+		return EAIResourceRepository.isShadow() ? (port + EAIResourceRepository.SHADOW_PORT_OFFSET) : port;
 	}
 	public void setPort(int port) {
 		this.port = port;
@@ -1484,7 +1485,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		if (httpServer == null) {
 			synchronized(this) {
 				if (httpServer == null) {
-					httpServer = HTTPServerUtils.newServer(port, listenerPoolSize, new EventDispatcherImpl(), new ThreadFactory() {
+					httpServer = HTTPServerUtils.newServer(getPort(), listenerPoolSize, new EventDispatcherImpl(), new ThreadFactory() {
 						@Override
 						public Thread newThread(Runnable r) {
 							Thread newThread = Executors.defaultThreadFactory().newThread(r);
