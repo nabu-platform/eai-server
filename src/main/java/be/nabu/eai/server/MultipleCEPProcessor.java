@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import be.nabu.libs.events.api.EventHandler;
+import be.nabu.utils.cep.api.EventSeverity;
 
 public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 
@@ -35,9 +36,14 @@ public class MultipleCEPProcessor implements EventHandler<Object, Void> {
 	}
 
 	public void add(String serviceId) {
+		add(serviceId, EventSeverity.ALERT);
+	}
+	
+	public void add(String serviceId, EventSeverity prioritySeverity) {
 		// remove any other instance of this service
 		remove(serviceId);
 		CEPProcessor cepProcessor = new CEPProcessor(server, serviceId);
+		cepProcessor.setPrioritySeverity(prioritySeverity);
 		add(cepProcessor);
 		// if already started, immediately go at it!
 		if (started) {

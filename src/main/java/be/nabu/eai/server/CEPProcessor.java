@@ -1,6 +1,7 @@
 package be.nabu.eai.server;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -16,6 +17,7 @@ import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
 import be.nabu.libs.services.api.SecurityContext;
 import be.nabu.libs.services.api.ServiceContext;
+import be.nabu.libs.services.api.ServiceException;
 import be.nabu.libs.services.api.TransactionContext;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.utils.cep.api.ComplexEvent;
@@ -38,6 +40,7 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 	// if we are getting a lot of pushes and stay over 500, perhaps we can't process at all (e.g. websocket down)
 	// if we keep interrupting the thread, we are wasting a lot of CPU cycles 
 	private Date lastInterrupted;
+	private EventSeverity prioritySeverity;
 	
 	public CEPProcessor(Server server, String cepService) {
 		this.server = server;
@@ -48,6 +51,53 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 		stopped = true;
 	}
 
+	private boolean pushEvents(DefinedService service, List<Object> eventsToProcess) throws ServiceException {
+		boolean handled = false;
+		ComplexContent newInstance = service.getServiceInterface().getInputDefinition().newInstance();
+		newInstance.set("events", eventsToProcess);
+		ExecutionContext ec = server.getRepository().newExecutionContext(SystemPrincipal.ROOT);
+		ServiceRuntime serviceRuntime = new ServiceRuntime(service, new ExecutionContext() {
+			@Override
+			public MetricInstance getMetricInstance(String id) {
+				return ec.getMetricInstance(id);
+			}
+
+			@Override
+			public ServiceContext getServiceContext() {
+				return ec.getServiceContext();
+			}
+
+			@Override
+			public TransactionContext getTransactionContext() {
+				return ec.getTransactionContext();
+			}
+
+			@Override
+			public SecurityContext getSecurityContext() {
+				return ec.getSecurityContext();
+			}
+
+			@Override
+			public boolean isDebug() {
+				return false;
+			}
+
+			// no eventing, we don't want to trace these calls!!
+			// otherwise we might end up in unending loops
+			@Override
+			public EventTarget getEventTarget() {
+				return null;
+			}
+			
+		});
+		handled = true;
+		ComplexContent run = serviceRuntime.run(newInstance);
+		if (run != null && run.getType().get("handled") != null) {
+			handled = run.get("handled") == null || (Boolean) run.get("handled");
+		}
+		return handled;
+	}
+	
 	public void start() {
 		Thread thread = new Thread(new Runnable() {
 			@Override
@@ -61,49 +111,9 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 								eventsToProcess = new ArrayList<Object>(events);
 							}
 							if (service != null) {
-								ComplexContent newInstance = service.getServiceInterface().getInputDefinition().newInstance();
-								newInstance.set("events", eventsToProcess);
-								ExecutionContext ec = server.getRepository().newExecutionContext(SystemPrincipal.ROOT);
-								ServiceRuntime serviceRuntime = new ServiceRuntime(service, new ExecutionContext() {
-									@Override
-									public MetricInstance getMetricInstance(String id) {
-										return ec.getMetricInstance(id);
-									}
-
-									@Override
-									public ServiceContext getServiceContext() {
-										return ec.getServiceContext();
-									}
-
-									@Override
-									public TransactionContext getTransactionContext() {
-										return ec.getTransactionContext();
-									}
-
-									@Override
-									public SecurityContext getSecurityContext() {
-										return ec.getSecurityContext();
-									}
-
-									@Override
-									public boolean isDebug() {
-										return false;
-									}
-
-									// no eventing, we don't want to trace these calls!!
-									// otherwise we might end up in unending loops
-									@Override
-									public EventTarget getEventTarget() {
-										return null;
-									}
-									
-								});
 								boolean handled = true;
 								try {
-									ComplexContent run = serviceRuntime.run(newInstance);
-									if (run != null && run.getType().get("handled") != null) {
-										handled = run.get("handled") == null || (Boolean) run.get("handled");
-									}
+									handled = pushEvents(service, eventsToProcess);
 								}
 								catch (Exception e) {
 									if (!skipOnError) {
@@ -172,24 +182,34 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 			if (severity != null && severity.ordinal() < cepSeverity.ordinal()) {
 				return null;
 			}
-			synchronized(events) {
-				events.add(event);
-			}
-			// if it is getting too much, interrupt the thread for processing (if applicable)
-			if (events.size() > 50 && thread != null) {
-				Date interrupted = new Date();
-				if (lastInterrupted == null || lastInterrupted.getTime() < interrupted.getTime() - INTERRUPT_INTERVAL) {
-					lastInterrupted = interrupted;
-					thread.interrupt();
+			if (severity != null && prioritySeverity != null && severity.ordinal() >= prioritySeverity.ordinal()) {
+				try {
+					pushEvents(getService(), Arrays.asList(event));
+				}
+				catch (Exception e) {
+					throw new RuntimeException(e);
 				}
 			}
-			// we have too many and apparently we can't dump 'em
-			if (events.size() > 500) {
-				Object remove;
-				synchronized(events) {	
-					remove = events.remove(0);
+			else {
+				synchronized(events) {
+					events.add(event);
 				}
-				logger.info("Not enough capacity for '" + cepService + "' to store event: " + remove);
+				// if it is getting too much, interrupt the thread for processing (if applicable)
+				if (events.size() > 50 && thread != null) {
+					Date interrupted = new Date();
+					if (lastInterrupted == null || lastInterrupted.getTime() < interrupted.getTime() - INTERRUPT_INTERVAL) {
+						lastInterrupted = interrupted;
+						thread.interrupt();
+					}
+				}
+				// we have too many and apparently we can't dump 'em
+				if (events.size() > 500) {
+					Object remove;
+					synchronized(events) {	
+						remove = events.remove(0);
+					}
+					logger.info("Not enough capacity for '" + cepService + "' to store event: " + remove);
+				}
 			}
 		}
 		return null;
@@ -201,6 +221,14 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 
 	public boolean isStopped() {
 		return stopped;
+	}
+
+	public EventSeverity getPrioritySeverity() {
+		return prioritySeverity;
+	}
+
+	public void setPrioritySeverity(EventSeverity prioritySeverity) {
+		this.prioritySeverity = prioritySeverity;
 	}
 	
 }

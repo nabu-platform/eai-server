@@ -478,6 +478,7 @@ public class Standalone {
 				server.enableMaven();
 			}
 		}
+		logger.info("------------------------------------ SERVER READY ------------------------------------");
 	}
 
 	public static String getIntegratorPath() {
