@@ -182,7 +182,8 @@ public class CEPProcessor implements EventHandler<Object, Void> {
 			if (severity != null && severity.ordinal() < cepSeverity.ordinal()) {
 				return null;
 			}
-			if (severity != null && prioritySeverity != null && severity.ordinal() >= prioritySeverity.ordinal()) {
+			// only push synchronously if it is started, otherwise we might be waiting for something
+			if (severity != null && prioritySeverity != null && severity.ordinal() >= prioritySeverity.ordinal() && thread != null) {
 				try {
 					pushEvents(getService(), Arrays.asList(event));
 				}
