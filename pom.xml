@@ -1,19 +1,14 @@
-<?xml version="1.0"?>
-<project
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
-	xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>be.nabu.eai</groupId>
 	<artifactId>eai-server</artifactId>
-	<version>${be.nabu.eai-eai-server-version}</version>
+	<version>1.30-SNAPSHOT</version>
 	<name>eai-server</name>
-
 	<parent>
 		<groupId>be.nabu</groupId>
 		<artifactId>core</artifactId>
 		<version>1.0-SNAPSHOT</version>
 	</parent>
-
 	<build>
 		<plugins>
 			<plugin>
@@ -26,10 +21,7 @@
 			</plugin>
 		</plugins>
 	</build>
-
 	<dependencies>
-		<!-- _____________________________________________ SPECIFIC ______________________________________________-->
-		<!-- Repository itself -->
 		<dependency>
 			<groupId>be.nabu.libs.http</groupId>
 			<artifactId>http-server-rest</artifactId>
@@ -62,15 +54,11 @@
 			<groupId>be.nabu.libs.cluster</groupId>
 			<artifactId>cluster-hazelcast</artifactId>
 		</dependency>
-		<!-- https://mvnrepository.com/artifact/com.hazelcast/hazelcast-all -->
 		<dependency>
-		    <groupId>com.hazelcast</groupId>
-		    <artifactId>hazelcast-all</artifactId>
-		    <version>3.12</version>
-		    <!-- <version>4.2.4</version> -->
+			<groupId>com.hazelcast</groupId>
+			<artifactId>hazelcast-all</artifactId>
+			<version>3.12</version>
 		</dependency>
-		
-		<!-- java 11+ -->
 		<dependency>
 			<groupId>javax.xml.bind</groupId>
 			<artifactId>jaxb-api</artifactId>
@@ -90,11 +78,11 @@
 			<groupId>javax.activation</groupId>
 			<artifactId>activation</artifactId>
 			<version>1.1.1</version>
-		</dependency> 
+		</dependency>
 		<dependency>
-		    <groupId>javax.jws</groupId>
-		    <artifactId>javax.jws-api</artifactId>
-		    <version>1.1</version>
+			<groupId>javax.jws</groupId>
+			<artifactId>javax.jws-api</artifactId>
+			<version>1.1</version>
 		</dependency>
 	</dependencies>
 </project>
