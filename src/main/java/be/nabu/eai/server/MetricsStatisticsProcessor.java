@@ -39,6 +39,7 @@ import be.nabu.libs.types.api.ComplexContent;
 
 public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics, Void> {
 
+	private static final int METRIC_CACHE_SIZE = Integer.parseInt(System.getProperty("metric.cache.size", "500"));
 	private static final int POLL_INTERVAL = 5000;
 	private static final int INTERRUPT_INTERVAL = 1000;
 	private Server server;
@@ -172,24 +173,23 @@ public class MetricsStatisticsProcessor implements EventHandler<MetricStatistics
 	@Override
 	public Void handle(MetricStatistics event) {
 		if (event != null && !stopped) {
+			int size = 0;
 			synchronized(metrics) {
 				metrics.add(event);
+				size = metrics.size();
+				// we have too many and apparently we can't dump 'em
+				if (size > METRIC_CACHE_SIZE) {
+					Object remove = metrics.remove(0);
+					logger.info("Not enough capacity (" + size + "/" + METRIC_CACHE_SIZE + ") for '" + metricService + "' to store metric: " + remove);
+				}
 			}
 			// if it is getting too much, interrupt the thread for processing (if applicable)
-			if (metrics.size() > 50 && thread != null) {
+			if (size > 50 && thread != null) {
 				Date interrupted = new Date();
 				if (lastInterrupted == null || lastInterrupted.getTime() < interrupted.getTime() - INTERRUPT_INTERVAL) {
 					lastInterrupted = interrupted;
 					thread.interrupt();
 				}
-			}
-			// we have too many and apparently we can't dump 'em
-			if (metrics.size() > 500) {
-				Object remove;
-				synchronized(metrics) {	
-					remove = metrics.remove(0);
-				}
-				logger.info("Not enough capacity for '" + metricService + "' to store metric: " + remove);
 			}
 		}
 		return null;
