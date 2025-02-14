@@ -50,6 +50,7 @@ import be.nabu.eai.repository.api.LicenseManager;
 import be.nabu.eai.repository.impl.AuthenticationEnricher;
 import be.nabu.eai.repository.impl.CorrelationIdEnricher;
 import be.nabu.eai.repository.impl.CreatedDateEnricher;
+import be.nabu.eai.repository.impl.ImageEnricher;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
 import be.nabu.eai.repository.util.MetricStatistics;
 import be.nabu.eai.repository.util.SystemPrincipal;
@@ -327,6 +328,7 @@ public class Standalone {
 		repositoryInstance.addEventEnricher("created", new CreatedDateEnricher());
 		repositoryInstance.addEventEnricher("correlation-id", new CorrelationIdEnricher());
 		repositoryInstance.addEventEnricher("authentication", new AuthenticationEnricher());
+		repositoryInstance.addEventEnricher("image", new ImageEnricher());
 		
 		if (aliasName != null) {
 			logger.debug("Setting aliases: " + aliasName);

@@ -122,6 +122,7 @@ import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.api.ClusteredServiceRunner;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.ImagedServiceRunner;
 import be.nabu.libs.services.api.NamedServiceRunner;
 import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
@@ -141,7 +142,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 
-public class Server implements NamedServiceRunner, ClusteredServiceRunner, ClusteredServer, ExecutorServiceProvider {
+public class Server implements NamedServiceRunner, ClusteredServiceRunner, ClusteredServer, ExecutorServiceProvider, ImagedServiceRunner {
 	
 	public static final String SERVICE_THREAD_POOL = "be.nabu.eai.server.serviceThreadPoolSize";
 	public static final String SERVICE_MAX_CACHE_SIZE = "be.nabu.eai.server.maxCacheSize";
@@ -1672,34 +1673,34 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		}
 	}
 
+	@Override
 	public String getImageName() {
 		return imageName;
 	}
-
 	public void setImageName(String imageName) {
 		this.imageName = imageName;
 	}
 
+	@Override
 	public String getImageVersion() {
 		return imageVersion;
 	}
-
 	public void setImageVersion(String imageVersion) {
 		this.imageVersion = imageVersion;
 	}
 
+	@Override
 	public String getImageEnvironment() {
 		return imageEnvironment;
 	}
-
 	public void setImageEnvironment(String imageEnvironment) {
 		this.imageEnvironment = imageEnvironment;
 	}
 
+	@Override
 	public Date getImageDate() {
 		return imageDate;
 	}
-
 	public void setImageDate(Date imageDate) {
 		this.imageDate = imageDate;
 	}
