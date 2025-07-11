@@ -128,6 +128,20 @@ public class Standalone {
 			System.getProperties().putAll(properties);
 		}
 		
+		// we also check environment variables
+		Map<String, String> environmentVariables = System.getenv();
+		for (Map.Entry<String, String> environmentVariable : environmentVariables.entrySet()) {
+			// all environment variables that start with the prefix "nabu_" are taken into account
+			if (environmentVariable.getKey().toLowerCase().startsWith("nabu_")) {
+				String key = environmentVariable.getKey().substring("nabu_".length());
+				// environment parameters are limited in expressing special characters, however dashes and dots are sometimes used in nabu settings.
+				// to allow for this, we use "underscore overloading" to express these
+				key = key.replaceAll("___", "-");
+				key = key.replaceAll("__", ".");
+				System.getProperties().setProperty(key, environmentVariable.getValue());
+			}
+		}
+		
 		int port = new Integer(getArgument("port", "5555", args));
 		int listenerPoolSize = new Integer(getArgument("listenerPoolSize", "20", args));
 
