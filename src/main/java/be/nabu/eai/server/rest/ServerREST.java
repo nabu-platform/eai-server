@@ -37,6 +37,7 @@ import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.SecurityContext;
@@ -107,9 +108,20 @@ public class ServerREST {
 
 	@Path("/reload/{id}")
 	@GET
-	public void reload(@PathParam("id") String id) {
-		repository.reload(id);
+	public void reload(@PathParam("id") String id, @QueryParam("recursive") Boolean recursive) {
+		// the default is "true"
+		repository.reload(id, recursive == null || recursive);
 		reloadClosestParent(id);
+	}
+	
+	@Path("/refresh/{id}")
+	@GET
+	public void refresh(@PathParam("id") String id, @QueryParam("recursive") Boolean recursive) {
+		Entry entry = repository.getEntry(id);
+		if (entry != null) {
+			// default false
+			entry.refresh(recursive != null && recursive);
+		}
 	}
 	
 	@Path("/gc")

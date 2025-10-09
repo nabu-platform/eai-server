@@ -167,7 +167,19 @@ public class RemoteServer implements NamedServiceRunner {
 	}
 
 	public void reload(String id) throws IOException, FormatException, ParseException {
-		URI target = URIUtils.getChild(endpoint, "/reload/" + id);
+		reload(id, null);
+	}
+	
+	public void reload(String id, Boolean recursive) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/reload/" + id + (recursive == null ? "" : "?recursive=" + recursive));
+		HTTPResponse response = request(HTTPUtils.get(target));
+		if (!isOk(response.getCode())) {
+			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
+		}
+	}
+	
+	public void refresh(String id, Boolean recursive) throws IOException, FormatException, ParseException {
+		URI target = URIUtils.getChild(endpoint, "/refresh/" + id + (recursive == null ? "" : "?recursive=" + recursive));
 		HTTPResponse response = request(HTTPUtils.get(target));
 		if (!isOk(response.getCode())) {
 			throw new IOException("The remote server sent back the code " + response.getCode() + ": " + response.getMessage());
