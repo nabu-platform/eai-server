@@ -451,7 +451,8 @@ public class Standalone {
 		}
 		
 		if (logComplexEvents) {
-			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
+//			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
+			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new JSONLogger(server));
 		}
 		logger.debug("Configuring event processors...");
 		MultipleCEPProcessor cepProcessor = new MultipleCEPProcessor(server);
