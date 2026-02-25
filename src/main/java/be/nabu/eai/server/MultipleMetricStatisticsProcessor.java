@@ -27,6 +27,8 @@ import be.nabu.libs.events.api.EventHandler;
 public class MultipleMetricStatisticsProcessor implements EventHandler<MetricStatistics, Void> {
 
 	private List<MetricsStatisticsProcessor> processors = new ArrayList<MetricsStatisticsProcessor>();
+	// added later, need to refactor this, probably remove the standard one alltogether?
+	private List<EventHandler<MetricStatistics, Void>> otherProcessors = new ArrayList<>();
 	private Server server;
 	private boolean started;
 
@@ -44,9 +46,13 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 				if (processor.isStopped()) {
 					iterator.remove();
 				}
-			} catch (Exception e) {
+			}
+			catch (Exception e) {
 				e.printStackTrace();
 			}
+		}
+		for (EventHandler<MetricStatistics, Void> otherProcessor : otherProcessors) {
+			otherProcessor.handle(event);
 		}
 		return null;
 	}
@@ -62,6 +68,10 @@ public class MultipleMetricStatisticsProcessor implements EventHandler<MetricSta
 		}
 	}
 
+	public void addOther(EventHandler<MetricStatistics, Void> processor) {
+		otherProcessors.add(processor);
+	}
+	
 	public void add(MetricsStatisticsProcessor processor) {
 		// structured like this to avoid concurrency issues with the handle
 		List<MetricsStatisticsProcessor> newProcessors = new ArrayList<MetricsStatisticsProcessor>(processors);

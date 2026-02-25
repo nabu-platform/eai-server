@@ -54,6 +54,7 @@ import be.nabu.eai.repository.impl.ImageEnricher;
 import be.nabu.eai.repository.util.LicenseManagerImpl;
 import be.nabu.eai.repository.util.MetricStatistics;
 import be.nabu.eai.repository.util.SystemPrincipal;
+import be.nabu.eai.server.MetricsOTLPProcessor.OTLPProtocol;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.api.PermissionHandler;
 import be.nabu.libs.authentication.api.RoleHandler;
@@ -142,8 +143,8 @@ public class Standalone {
 			}
 		}
 		
-		int port = new Integer(getArgument("port", "5555", args));
-		int listenerPoolSize = new Integer(getArgument("listenerPoolSize", "20", args));
+		int port = Integer.parseInt(getArgument("port", "5555", args));
+		int listenerPoolSize = Integer.parseInt(getArgument("listenerPoolSize", "20", args));
 
 		ResourceContainer<?> mavenRoot = null;
 		String modulesUri = getArgument("modules", getArgument("maven", null, args), args);
@@ -288,17 +289,17 @@ public class Standalone {
 		// so nothing gets unloaded but everything does get loaded
 		// this means stuff like http servers etc fail on restart because the previous one is still running
 		// should definitely fix the deployment procedure as well but enabling snapshots in non-development environments is not a bad thing either
-		boolean enableSnapshots = new Boolean(getArgument("enableSnapshots", Boolean.toString(!EAIResourceRepository.isDevelopment()), args));
-		boolean enableREST = new Boolean(getArgument("enableREST", "false", args));
-		boolean enableMaven = new Boolean(getArgument("enableMaven", "false", args));
-		boolean enableRepository = new Boolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
-		boolean forceRemoteRepository = new Boolean(getArgument("forceRemoteRepository", "true", args));
-		boolean updateMavenSnapshots = new Boolean(getArgument("updateMavenSnapshots", "false", args));
-		boolean enableMetrics = new Boolean(getArgument("enableMetrics", "true", args));
-		boolean historizeGauges = new Boolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
-		boolean anonymousIsRoot = new Boolean(getArgument("anonymousIsRoot", "true", args));
-		boolean startup = new Boolean(getArgument("startup", "true", args));
-		boolean logComplexEvents = new Boolean(getArgument("logComplexEvents", "true", args));
+		boolean enableSnapshots = Boolean.parseBoolean(getArgument("enableSnapshots", Boolean.toString(!EAIResourceRepository.isDevelopment()), args));
+		boolean enableREST = Boolean.parseBoolean(getArgument("enableREST", "false", args));
+		boolean enableMaven = Boolean.parseBoolean(getArgument("enableMaven", "false", args));
+		boolean enableRepository = Boolean.parseBoolean(getArgument("enableRepository", Boolean.toString(enableREST), args));
+		boolean forceRemoteRepository = Boolean.parseBoolean(getArgument("forceRemoteRepository", "true", args));
+		boolean updateMavenSnapshots = Boolean.parseBoolean(getArgument("updateMavenSnapshots", "false", args));
+		boolean enableMetrics = Boolean.parseBoolean(getArgument("enableMetrics", "true", args));
+		boolean historizeGauges = Boolean.parseBoolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
+		boolean anonymousIsRoot = Boolean.parseBoolean(getArgument("anonymousIsRoot", "true", args));
+		boolean startup = Boolean.parseBoolean(getArgument("startup", "true", args));
+		boolean logComplexEvents = Boolean.parseBoolean(getArgument("logComplexEvents", "true", args));
 		String cepService = getArgument("cepService", null, args);
 		long historizationInterval = Long.parseLong(getArgument("historizationInterval", "5000", args));
 		int historySize = Integer.parseInt(getArgument("historySize", "1000", args));
@@ -313,6 +314,10 @@ public class Standalone {
 		String serverName = getArgument("name", null, args);
 		String groupName = getArgument("group", null, args);
 		String aliasName = getArgument("alias", null, args);
+		String otelEndpoint = getArgument("otel", "http://localhost:4317", args);
+		String otelProtocol = getArgument("otelProtocol", "grpc", args);
+		boolean enableOtelMetrics = Boolean.parseBoolean(getArgument("otelMetrics", "false", args));
+		boolean enableOtelLogs = Boolean.parseBoolean(getArgument("otelLogs", "false", args));
 		
 		if (groupName == null && imageName != null && imageEnvironment != null) {
 			groupName = imageName + "-" + imageEnvironment;
@@ -465,9 +470,12 @@ public class Standalone {
 		}
 		repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
 		
-		MultipleMetricStatisticsProcessor metricProcessor = new MultipleMetricStatisticsProcessor(server);
-		server.setMetricsStatisticsProcessor(metricProcessor);
-		repositoryInstance.getMetricsDispatcher().subscribe(MetricStatistics.class, metricProcessor);
+		if (enableOtelMetrics) {
+			MultipleMetricStatisticsProcessor metricProcessor = new MultipleMetricStatisticsProcessor(server);
+			metricProcessor.addOther(new MetricsOTLPProcessor(groupName, serverName, otelEndpoint, OTLPProtocol.valueOf(otelProtocol.toUpperCase())));
+			server.setMetricsStatisticsProcessor(metricProcessor);
+			repositoryInstance.getMetricsDispatcher().subscribe(MetricStatistics.class, metricProcessor);
+		}
 		
 		logger.debug("Initializing server...");
 		server.initialize();
@@ -503,7 +511,7 @@ public class Standalone {
 			}
 			Map<String, URI> aliases = AliasResourceResolver.getAliases();
 			for (String alias : aliases.keySet()) {
-				boolean enableAlias = new Boolean(getArgument("enableAlias." + alias, "false", args));
+				boolean enableAlias = Boolean.parseBoolean(getArgument("enableAlias." + alias, "false", args));
 				if (enableAlias) {
 					server.enableAlias(alias, aliases.get(alias));
 				}
