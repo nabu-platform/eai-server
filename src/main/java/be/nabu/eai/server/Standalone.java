@@ -316,8 +316,8 @@ public class Standalone {
 		String aliasName = getArgument("alias", null, args);
 		String otelEndpoint = getArgument("otel", "http://localhost:4317", args);
 		String otelProtocol = getArgument("otelProtocol", "grpc", args);
-		boolean enableOtelMetrics = Boolean.parseBoolean(getArgument("otelMetrics", "false", args));
-		boolean enableOtelLogs = Boolean.parseBoolean(getArgument("otelLogs", "false", args));
+		boolean enableOtelMetrics = Boolean.parseBoolean(getArgument("otel.metrics", "false", args));
+		boolean enableOtelLogs = Boolean.parseBoolean(getArgument("otel.logs", "false", args));
 		
 		if (groupName == null && imageName != null && imageEnvironment != null) {
 			groupName = imageName + "-" + imageEnvironment;
@@ -459,6 +459,10 @@ public class Standalone {
 //			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new CEFLogger(server));
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new JSONLogger(server));
 		}
+		if (enableOtelLogs) {
+			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new OTLPLogger(server, otelEndpoint, OTLPProtocol.valueOf(otelProtocol.toUpperCase())));
+		}
+		
 		logger.debug("Configuring event processors...");
 		MultipleCEPProcessor cepProcessor = new MultipleCEPProcessor(server);
 		server.setProcessor(cepProcessor);
