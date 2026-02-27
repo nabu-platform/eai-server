@@ -474,12 +474,12 @@ public class Standalone {
 		}
 		repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, cepProcessor);
 		
+		MultipleMetricStatisticsProcessor metricProcessor = new MultipleMetricStatisticsProcessor(server);
 		if (enableOtelMetrics) {
-			MultipleMetricStatisticsProcessor metricProcessor = new MultipleMetricStatisticsProcessor(server);
 			metricProcessor.addOther(new MetricsOTLPProcessor(groupName, serverName, otelEndpoint, OTLPProtocol.valueOf(otelProtocol.toUpperCase())));
-			server.setMetricsStatisticsProcessor(metricProcessor);
-			repositoryInstance.getMetricsDispatcher().subscribe(MetricStatistics.class, metricProcessor);
 		}
+		server.setMetricsStatisticsProcessor(metricProcessor);
+		repositoryInstance.getMetricsDispatcher().subscribe(MetricStatistics.class, metricProcessor);
 		
 		logger.debug("Initializing server...");
 		server.initialize();

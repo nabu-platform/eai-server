@@ -19,10 +19,11 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
-import java.util.concurrent.TimeUnit;
 import org.slf4j.LoggerFactory;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.types.ComplexContentWrapperFactory;
@@ -35,13 +36,12 @@ import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.logs.LogRecordBuilder;
 import io.opentelemetry.api.logs.Severity;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.SpanId;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceId;
 import io.opentelemetry.api.trace.TraceState;
-import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.exporter.otlp.http.logs.OtlpHttpLogRecordExporter;
 import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
@@ -49,12 +49,16 @@ import io.opentelemetry.exporter.otlp.logs.OtlpGrpcLogRecordExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.sdk.logs.SdkLoggerProvider;
 import io.opentelemetry.sdk.logs.SdkLoggerProviderBuilder;
+import io.opentelemetry.sdk.common.CompletableResultCode;
+import io.opentelemetry.sdk.common.InstrumentationLibraryInfo;
+import io.opentelemetry.sdk.common.InstrumentationScopeInfo;
 import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
 import io.opentelemetry.sdk.logs.export.LogRecordExporter;
 import io.opentelemetry.sdk.resources.Resource;
-import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder;
-import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.data.EventData;
+import io.opentelemetry.sdk.trace.data.LinkData;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.data.StatusData;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 
 public class OTLPLogger implements EventHandler<Object, Void> {
@@ -62,8 +66,10 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 	private static final String INSTRUMENTATION_NAME = "be.nabu.eai.events";
 	private static final String OTEL_SERVICE_NAME = "nabu";
 	private final EventSeverity otlpSeverity = EventSeverity.valueOf(System.getProperty("otlpSeverity", "INFO"));
+	private final boolean debug = Boolean.parseBoolean(System.getProperty("otlp.debug", "false"));
 	private static final Map<String, String> MAPPINGS = Map.ofEntries(
-		Map.entry("artifactId", "service.name"),
+			// this overwrites the service which should be static. instead set as resource.name (see below)
+//		Map.entry("artifactId", "service.name"),
 		Map.entry("serverGroup", "service.namespace"),
 		Map.entry("serverName", "service.instance.id"),
 		Map.entry("serverHost", "host.name"),
@@ -118,10 +124,12 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 	private final org.slf4j.Logger logger = LoggerFactory.getLogger(getClass());
 	private final Server server;
 	private final String host;
-	private final SdkTracerProvider tracerProvider;
 	private final SdkLoggerProvider loggerProvider;
-	private final Tracer tracer;
 	private final io.opentelemetry.api.logs.Logger otelLogger;
+	private final SpanExporter spanExporter;
+	private final LogRecordExporter logExporter;
+	private final Resource resource;
+	private final InstrumentationScopeInfo instrumentationInfo;
 
 	public OTLPLogger(Server server, String otelEndpoint, MetricsOTLPProcessor.OTLPProtocol protocol) {
 		this.server = server;
@@ -134,7 +142,7 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		}
 		this.host = detectedHost;
 
-		Resource resource = Resource.getDefault()
+		this.resource = Resource.getDefault()
 			.toBuilder()
 			.put(AttributeKey.stringKey("service.name"), OTEL_SERVICE_NAME)
 			.put(AttributeKey.stringKey("service.namespace"), server.getRepository().getGroup())
@@ -172,19 +180,15 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			logger.error("Failed to initialize OTLP exporters for {} {}", protocol, otelEndpoint, e);
 		}
 
-		SdkTracerProviderBuilder tracerBuilder = SdkTracerProvider.builder()
-			.setResource(resource);
-		if (spanExporter != null) {
-			tracerBuilder.addSpanProcessor(BatchSpanProcessor.builder(spanExporter).build());
-		}
-		this.tracerProvider = tracerBuilder.build();
-
 		SdkLoggerProviderBuilder loggerBuilder = SdkLoggerProvider.builder()
-			.setResource(resource);
+			.setResource(this.resource);
 		if (logExporter != null) {
 			loggerBuilder.addLogRecordProcessor(BatchLogRecordProcessor.builder(logExporter).build());
 		}
 		this.loggerProvider = loggerBuilder.build();
+		this.spanExporter = spanExporter;
+		this.logExporter = logExporter;
+		this.instrumentationInfo = InstrumentationScopeInfo.create(INSTRUMENTATION_NAME);
 
 		if (spanExporter != null && logExporter != null) {
 			logger.info("OTLP logger initialized using {} at {}", protocol, otelEndpoint);
@@ -193,7 +197,6 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			logger.warn("OTLP logger initialized without exporters using {} at {}", protocol, otelEndpoint);
 		}
 
-		this.tracer = tracerProvider.get(INSTRUMENTATION_NAME);
 		this.otelLogger = loggerProvider.get(INSTRUMENTATION_NAME);
 	}
 
@@ -216,11 +219,17 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 
 		ComplexContent wrapped = ComplexContentWrapperFactory.getInstance().getWrapper().wrap(event);
 		if (wrapped == null) {
+			if (debug) {
+				logger.debug("OTLPLogger skipped event: unable to wrap {}", event);
+			}
 			return null;
 		}
 
 		EventSeverity severity = getEventSeverity(wrapped.get("severity"));
 		if (severity != null && severity.ordinal() < otlpSeverity.ordinal()) {
+			if (debug) {
+				logger.debug("OTLPLogger skipped event due to severity {} < {}", severity, otlpSeverity);
+			}
 			return null;
 		}
 
@@ -228,23 +237,21 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		Instant started = toInstant(wrapped.get("started"));
 		Instant stopped = toInstant(wrapped.get("stopped"));
 		String traceId = getTraceId(wrapped);
+		String spanId = getSpanId(wrapped);
+		String parentSpanId = getParentSpanId(wrapped);
 
-		if (started != null && stopped != null && traceId != null) {
+		if (started != null && stopped != null && traceId != null && spanId != null) {
 			String spanName = getSpanName(wrapped);
-			SpanBuilder spanBuilder = tracer.spanBuilder(spanName)
-				.setStartTimestamp(started.toEpochMilli(), TimeUnit.MILLISECONDS)
-				.setAllAttributes(attributes);
-
-			Context parentContext = getParentContext(wrapped);
-			if (parentContext != null) {
-				spanBuilder.setParent(parentContext);
+			SpanData spanData = createSpanData(traceId, spanId, parentSpanId, spanName, attributes, severity, started, stopped);
+			exportSpan(spanData);
+			if (debug) {
+				logger.debug("OTLPLogger emitted span name={} traceId={} spanId={} parentSpanId={}", spanName, traceId, spanId, parentSpanId);
 			}
-
-			Span span = spanBuilder.startSpan();
-			applyStatus(span, wrapped);
-			span.end(stopped.toEpochMilli(), TimeUnit.MILLISECONDS);
 		}
 		else {
+			if (debug) {
+				logger.debug("OTLPLogger falling back to log started={} stopped={} traceId={} spanId={}", started, stopped, traceId, spanId);
+			}
 			LogRecordBuilder logBuilder = otelLogger.logRecordBuilder();
 			logBuilder.setAllAttributes(attributes);
 			logBuilder.setSeverity(mapSeverity(wrapped));
@@ -263,9 +270,9 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 				logBuilder.setTimestamp(timestamp);
 			}
 
-			Context parentContext = getParentContext(wrapped);
-			if (parentContext != null) {
-				logBuilder.setContext(parentContext);
+			Context logContext = getLogContext(traceId, spanId, parentSpanId);
+			if (logContext != null) {
+				logBuilder.setContext(logContext);
 			}
 
 			logBuilder.emit();
@@ -281,11 +288,21 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		catch (Exception e) {
 			logger.warn("Failed to shutdown OTLP logger", e);
 		}
-		try {
-			tracerProvider.shutdown();
+		if (spanExporter != null) {
+			try {
+				spanExporter.shutdown();
+			}
+			catch (Exception e) {
+				logger.warn("Failed to shutdown OTLP span exporter", e);
+			}
 		}
-		catch (Exception e) {
-			logger.warn("Failed to shutdown OTLP tracer", e);
+		if (logExporter != null) {
+			try {
+				logExporter.shutdown();
+			}
+			catch (Exception e) {
+				logger.warn("Failed to shutdown OTLP log exporter", e);
+			}
 		}
 	}
 
@@ -309,15 +326,29 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			putAttribute(builder, "body", reason);
 		}
 
-		Object parentId = wrapped.get("parentId");
-		if (parentId != null) {
-			putAttribute(builder, "parent_id", parentId);
-		}
-
 		EventSeverity severity = getEventSeverity(wrapped.get("severity"));
 		if (severity != null) {
 			builder.put(AttributeKey.longKey("severity_number"), severity.getOtelLevel());
 			builder.put(AttributeKey.stringKey("severity_text"), severity.name());
+		}
+		String resourceName = getStringValue(wrapped.get("artifactId"));
+		if (resourceName == null) {
+			resourceName = getStringValue(wrapped.get("eventName"));
+		}
+		if (resourceName != null) {
+			builder.put(AttributeKey.stringKey("resource.name"), resourceName);
+		}
+		String traceId = getTraceId(wrapped);
+		if (traceId != null) {
+			builder.put(AttributeKey.stringKey("trace_id"), traceId);
+		}
+		String spanId = getSpanId(wrapped);
+		if (spanId != null) {
+			builder.put(AttributeKey.stringKey("span_id"), spanId);
+		}
+		String parentSpanId = getParentSpanId(wrapped);
+		if (parentSpanId != null) {
+			builder.put(AttributeKey.stringKey("parent_span_id"), parentSpanId);
 		}
 
 		return builder.build();
@@ -359,17 +390,19 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		return null;
 	}
 
-	private Context getParentContext(ComplexContent wrapped) {
-		String traceId = getTraceId(wrapped);
-		String parentId = getStringValue(wrapped.get("parentId"));
-		if (traceId == null || parentId == null) {
+	private Context getLogContext(String traceId, String spanId, String parentSpanId) {
+		if (traceId == null) {
 			return null;
 		}
-		if (!TraceId.isValid(traceId) || !SpanId.isValid(parentId)) {
-			logger.debug("Invalid trace/span id: traceId={}, parentId={}", traceId, parentId);
+		String contextSpanId = spanId != null ? spanId : parentSpanId;
+		if (contextSpanId == null) {
 			return null;
 		}
-		SpanContext spanContext = SpanContext.createFromRemoteParent(traceId, parentId, TraceFlags.getSampled(), TraceState.getDefault());
+		if (!TraceId.isValid(traceId) || !SpanId.isValid(contextSpanId)) {
+			logger.debug("Invalid trace/span id for log context: traceId={}, spanId={}", traceId, contextSpanId);
+			return null;
+		}
+		SpanContext spanContext = SpanContext.createFromRemoteParent(traceId, contextSpanId, TraceFlags.getSampled(), TraceState.getDefault());
 		return Context.root().with(Span.wrap(spanContext));
 	}
 
@@ -391,6 +424,22 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		return null;
 	}
 
+	private String getSpanId(ComplexContent wrapped) {
+		String spanId = getStringValue(wrapped.get("spanId"));
+		if (spanId != null && SpanId.isValid(spanId)) {
+			return spanId;
+		}
+		return null;
+	}
+
+	private String getParentSpanId(ComplexContent wrapped) {
+		String parentSpanId = getStringValue(wrapped.get("parentSpanId"));
+		if (parentSpanId != null && SpanId.isValid(parentSpanId)) {
+			return parentSpanId;
+		}
+		return null;
+	}
+
 	private Severity mapSeverity(ComplexContent wrapped) {
 		EventSeverity severity = getEventSeverity(wrapped.get("severity"));
 		if (severity == null) {
@@ -400,11 +449,11 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		return getSeverityFromOtelLevel(severity.getOtelLevel());
 	}
 
-	private void applyStatus(Span span, ComplexContent wrapped) {
-		EventSeverity severity = getEventSeverity(wrapped.get("severity"));
+	private StatusData getStatusData(EventSeverity severity) {
 		if (severity != null && severity.getOtelLevel() >= 17) {
-			span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR);
+			return StatusData.create(io.opentelemetry.api.trace.StatusCode.ERROR, severity.name());
 		}
+		return StatusData.unset();
 	}
 
 	private EventSeverity getEventSeverity(Object severityObject) {
@@ -448,6 +497,36 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			return Severity.ERROR;
 		}
 		return Severity.FATAL;
+	}
+
+	private SpanData createSpanData(String traceId, String spanId, String parentSpanId, String spanName,
+			Attributes attributes, EventSeverity severity, Instant started, Instant stopped) {
+		SpanContext spanContext = SpanContext.create(traceId, spanId, TraceFlags.getSampled(), TraceState.getDefault());
+		SpanContext parentSpanContext = parentSpanId == null
+			? SpanContext.getInvalid()
+			: SpanContext.createFromRemoteParent(traceId, parentSpanId, TraceFlags.getSampled(), TraceState.getDefault());
+		long startEpochNanos = toEpochNanos(started);
+		long endEpochNanos = toEpochNanos(stopped);
+		StatusData statusData = getStatusData(severity);
+		return new OTLPSpanData(spanName, SpanKind.INTERNAL, spanContext, parentSpanContext, statusData,
+				startEpochNanos, endEpochNanos, attributes, instrumentationInfo, resource);
+	}
+
+	private void exportSpan(SpanData spanData) {
+		if (spanExporter == null) {
+			logger.debug("OTLP span exporter not available; dropping span {}", spanData.getName());
+			return;
+		}
+		CompletableResultCode result = spanExporter.export(Collections.singletonList(spanData));
+		result.whenComplete(() -> {
+			if (!result.isSuccess()) {
+				logger.warn("Failed to export OTLP span {}", spanData.getName(), result.getFailureThrowable());
+			}
+		});
+	}
+
+	private long toEpochNanos(Instant instant) {
+		return instant.getEpochSecond() * 1000000000L + instant.getNano();
 	}
 
 	private Instant toInstant(Object value) {
@@ -499,5 +578,122 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			return;
 		}
 		builder.put(AttributeKey.stringKey(key), value.toString());
+	}
+
+	private static final class OTLPSpanData implements SpanData {
+		private final String name;
+		private final SpanKind kind;
+		private final SpanContext spanContext;
+		private final SpanContext parentSpanContext;
+		private final StatusData status;
+		private final long startEpochNanos;
+		private final long endEpochNanos;
+		private final Attributes attributes;
+		private final List<EventData> events;
+		private final List<LinkData> links;
+		private final InstrumentationScopeInfo instrumentationScopeInfo;
+		private final Resource resource;
+
+		private OTLPSpanData(String name, SpanKind kind, SpanContext spanContext, SpanContext parentSpanContext,
+				StatusData status, long startEpochNanos, long endEpochNanos, Attributes attributes,
+				InstrumentationScopeInfo instrumentationScopeInfo, Resource resource) {
+			this.name = name;
+			this.kind = kind;
+			this.spanContext = spanContext;
+			this.parentSpanContext = parentSpanContext;
+			this.status = status;
+			this.startEpochNanos = startEpochNanos;
+			this.endEpochNanos = endEpochNanos;
+			this.attributes = attributes;
+			this.events = Collections.emptyList();
+			this.links = Collections.emptyList();
+			this.instrumentationScopeInfo = instrumentationScopeInfo;
+			this.resource = resource;
+		}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public SpanKind getKind() {
+			return kind;
+		}
+
+		@Override
+		public SpanContext getSpanContext() {
+			return spanContext;
+		}
+
+		@Override
+		public SpanContext getParentSpanContext() {
+			return parentSpanContext;
+		}
+
+		@Override
+		public StatusData getStatus() {
+			return status;
+		}
+
+		@Override
+		public long getStartEpochNanos() {
+			return startEpochNanos;
+		}
+
+		@Override
+		public Attributes getAttributes() {
+			return attributes;
+		}
+
+		@Override
+		public List<EventData> getEvents() {
+			return events;
+		}
+
+		@Override
+		public List<LinkData> getLinks() {
+			return links;
+		}
+
+		@Override
+		public long getEndEpochNanos() {
+			return endEpochNanos;
+		}
+
+		@Override
+		public boolean hasEnded() {
+			return true;
+		}
+
+		@Override
+		public int getTotalRecordedEvents() {
+			return events.size();
+		}
+
+		@Override
+		public int getTotalRecordedLinks() {
+			return links.size();
+		}
+
+		@Override
+		public int getTotalAttributeCount() {
+			return attributes.size();
+		}
+
+		@Override
+		public InstrumentationLibraryInfo getInstrumentationLibraryInfo() {
+			return InstrumentationLibraryInfo.empty();
+		}
+
+		@Override
+		public InstrumentationScopeInfo getInstrumentationScopeInfo() {
+			return instrumentationScopeInfo;
+		}
+
+		@Override
+		public Resource getResource() {
+			return resource;
+		}
 	}
 }
