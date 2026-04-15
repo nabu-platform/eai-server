@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.types.ComplexContentWrapperFactory;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.api.Element;
 import be.nabu.utils.cep.api.EventSeverity;
 import be.nabu.utils.cep.impl.ComplexEventImpl;
 import io.opentelemetry.api.common.AttributeKey;
@@ -65,8 +66,11 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 	private static final Duration OTEL_TIMEOUT = Duration.ofSeconds(15);
 	private static final String INSTRUMENTATION_NAME = "be.nabu.eai.events";
 	private static final String OTEL_SERVICE_NAME = "nabu";
-	private final EventSeverity otlpSeverity = EventSeverity.valueOf(System.getProperty("otlpSeverity", "INFO"));
+	private final EventSeverity otlpLogSeverity = EventSeverity.valueOf(System.getProperty("otlp.log_severity", "INFO"));
+	private final EventSeverity otlpSpanSeverity = EventSeverity.valueOf(System.getProperty("otlp.span_severity", "DEBUG"));
 	private final boolean debug = Boolean.parseBoolean(System.getProperty("otlp.debug", "false"));
+	private final boolean OTEL_LOGS_AS_SPANS = Boolean.parseBoolean(System.getProperty("otlp.logs_as_spans", "true"));
+	private final boolean OTEL_SPANS_AS_LOGS = Boolean.parseBoolean(System.getProperty("otlp.spans_as_logs", "true"));
 	private static final Map<String, String> MAPPINGS = Map.ofEntries(
 			// this overwrites the service which should be static. instead set as resource.name (see below)
 //		Map.entry("artifactId", "service.name"),
@@ -224,15 +228,12 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			}
 			return null;
 		}
-
+		
 		EventSeverity severity = getEventSeverity(wrapped.get("severity"));
-		if (severity != null && severity.ordinal() < otlpSeverity.ordinal()) {
-			if (debug) {
-				logger.debug("OTLPLogger skipped event due to severity {} < {}", severity, otlpSeverity);
-			}
-			return null;
-		}
 
+		boolean logAsSpan = OTEL_LOGS_AS_SPANS && (severity == null || severity.ordinal() >= otlpSpanSeverity.ordinal());
+		boolean logAsLog = (!logAsSpan || OTEL_SPANS_AS_LOGS) && (severity == null || severity.ordinal() >= otlpLogSeverity.ordinal());
+		
 		Attributes attributes = buildAttributes(wrapped);
 		Instant started = toInstant(wrapped.get("started"));
 		Instant stopped = toInstant(wrapped.get("stopped"));
@@ -240,7 +241,7 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 		String spanId = getSpanId(wrapped);
 		String parentSpanId = getParentSpanId(wrapped);
 
-		if (started != null && stopped != null && traceId != null && spanId != null) {
+		if (logAsSpan && started != null && stopped != null && traceId != null && spanId != null) {
 			String spanName = getSpanName(wrapped);
 			SpanData spanData = createSpanData(traceId, spanId, parentSpanId, spanName, attributes, severity, started, stopped);
 			exportSpan(spanData);
@@ -248,7 +249,8 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 				logger.debug("OTLPLogger emitted span name={} traceId={} spanId={} parentSpanId={}", spanName, traceId, spanId, parentSpanId);
 			}
 		}
-		else {
+		// either we are not sending logs as spans or we want all spans to be duplicated to the logs
+		if (logAsLog) {
 			if (debug) {
 				logger.debug("OTLPLogger falling back to log started={} stopped={} traceId={} spanId={}", started, stopped, traceId, spanId);
 			}
@@ -314,6 +316,18 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 				continue;
 			}
 			putAttribute(builder, entry.getValue(), value);
+		}
+
+		for (Element<?> element : wrapped.getType()) {
+			String name = element.getName();
+			if (name == null || MAPPINGS.containsKey(name)) {
+				continue;
+			}
+			Object value = wrapped.get(name);
+			if (value == null) {
+				continue;
+			}
+			putAttribute(builder, name, value);
 		}
 
 		Object reason = wrapped.get("reason");
@@ -556,6 +570,12 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 
 	private void putAttribute(AttributesBuilder builder, String key, Object value) {
 		if (value == null) {
+			return;
+		}
+		if (value instanceof TimeZone) {
+			TimeZone timeZone = (TimeZone) value;
+			String zoneId = timeZone.getID();
+			builder.put(AttributeKey.stringKey(key), zoneId != null ? zoneId : timeZone.toString());
 			return;
 		}
 		if (value instanceof Boolean) {
