@@ -27,6 +27,7 @@ import java.util.TimeZone;
 import org.slf4j.LoggerFactory;
 import be.nabu.libs.events.api.EventHandler;
 import be.nabu.libs.types.ComplexContentWrapperFactory;
+import be.nabu.libs.types.TypeUtils;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.api.Element;
 import be.nabu.utils.cep.api.EventSeverity;
@@ -67,7 +68,8 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 	private static final String INSTRUMENTATION_NAME = "be.nabu.eai.events";
 	private static final String OTEL_SERVICE_NAME = "nabu";
 	private final EventSeverity otlpLogSeverity = EventSeverity.valueOf(System.getProperty("otlp.log_severity", "INFO"));
-	private final EventSeverity otlpSpanSeverity = EventSeverity.valueOf(System.getProperty("otlp.span_severity", "DEBUG"));
+	// temporarily set this to DEBUG but in prd this generates too much info, we got out of memory issues because it could not get processed in time over grpc
+	private final EventSeverity otlpSpanSeverity = EventSeverity.valueOf(System.getProperty("otlp.span_severity", "INFO"));
 	private final boolean debug = Boolean.parseBoolean(System.getProperty("otlp.debug", "false"));
 	private final boolean OTEL_LOGS_AS_SPANS = Boolean.parseBoolean(System.getProperty("otlp.logs_as_spans", "true"));
 	private final boolean OTEL_SPANS_AS_LOGS = Boolean.parseBoolean(System.getProperty("otlp.spans_as_logs", "true"));
@@ -318,7 +320,7 @@ public class OTLPLogger implements EventHandler<Object, Void> {
 			putAttribute(builder, entry.getValue(), value);
 		}
 
-		for (Element<?> element : wrapped.getType()) {
+		for (Element<?> element : TypeUtils.getAllChildren(wrapped.getType())) {
 			String name = element.getName();
 			if (name == null || MAPPINGS.containsKey(name)) {
 				continue;

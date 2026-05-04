@@ -318,6 +318,8 @@ public class Standalone {
 		String otelProtocol = getArgument("otelProtocol", "grpc", args);
 		boolean enableOtelMetrics = Boolean.parseBoolean(getArgument("otel.metrics", "false", args));
 		boolean enableOtelLogs = Boolean.parseBoolean(getArgument("otel.logs", "false", args));
+		boolean enableOtelHeartbeat = Boolean.parseBoolean(getArgument("otel.heartbeat", "false", args));
+		long otelHeartbeatInterval = Long.parseLong(getArgument("otel.heartbeat.interval", "5000", args));
 		
 		if (groupName == null && imageName != null && imageEnvironment != null) {
 			groupName = imageName + "-" + imageEnvironment;
@@ -461,6 +463,15 @@ public class Standalone {
 		}
 		if (enableOtelLogs) {
 			repositoryInstance.getComplexEventDispatcher().subscribe(Object.class, new OTLPLogger(server, otelEndpoint, OTLPProtocol.valueOf(otelProtocol.toUpperCase())));
+		}
+		if (enableOtelHeartbeat) {
+			HeartbeatOTLPReporter heartbeat = new HeartbeatOTLPReporter(groupName, serverName, otelEndpoint, OTLPProtocol.valueOf(otelProtocol.toUpperCase()), otelHeartbeatInterval);
+			server.addShutdownAction(new Runnable() {
+				@Override
+				public void run() {
+					heartbeat.stop();
+				}
+			});
 		}
 		
 		logger.debug("Configuring event processors...");
