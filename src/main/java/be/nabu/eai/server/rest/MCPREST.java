@@ -14,6 +14,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import be.nabu.eai.repository.EAIRepositoryUtils;
+import be.nabu.eai.repository.api.ArtifactFragmentManager;
+import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
+import be.nabu.eai.repository.api.Node;
+import be.nabu.libs.artifacts.api.Artifact;
+
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
@@ -34,6 +40,8 @@ import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.map.MapContent;
 import be.nabu.libs.types.map.MapContentWrapper;
 import be.nabu.libs.types.map.MapTypeGenerator;
+import be.nabu.libs.validator.api.Validation;
+import be.nabu.libs.validator.api.ValidationMessage.Severity;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.Header;
 import be.nabu.utils.mime.impl.MimeHeader;
@@ -43,7 +51,8 @@ import be.nabu.utils.mime.impl.PlainMimeContentPart;
 public class MCPREST {
 
 	private static final String MCP_VERSION = "2025-03-26";
-	private static final String TOOL_NAME = "search_nabu_artifacts";
+	private static final String SEARCH_TOOL_NAME = "search_nabu_artifacts";
+	private static final String EDIT_TOOL_NAME = "edit_nabu_artifact";
 	private static final String MCP_SESSION_ID = "MCP-Session-Id";
 	private static final String SESSION_MAP = "mcp.rest.sessions";
 	private static final int MAX_RESULT_BYTES = 32000;
@@ -90,30 +99,46 @@ public class MCPREST {
 		if ("tools/list".equals(method)) {
 			resolveSessionConfiguration(request, false);
 			Map<String, Object> result = new LinkedHashMap<String, Object>();
-			Map<String, Object> tool = new LinkedHashMap<String, Object>();
-			tool.put("name", TOOL_NAME);
-			tool.put("title", "Search nabu artifacts");
-			tool.put("description", "Search indexed artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths.");
-			Map<String, Object> inputSchema = new LinkedHashMap<String, Object>();
-			inputSchema.put("type", "object");
-			Map<String, Object> properties = new LinkedHashMap<String, Object>();
-			properties.put("pattern", schema("string"));
+			List<Map<String, Object>> tools = new ArrayList<Map<String, Object>>();
+			Map<String, Object> searchTool = new LinkedHashMap<String, Object>();
+			searchTool.put("name", SEARCH_TOOL_NAME);
+			searchTool.put("title", "Search nabu artifacts");
+			searchTool.put("description", "Search indexed artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths.");
+			Map<String, Object> searchInputSchema = new LinkedHashMap<String, Object>();
+			searchInputSchema.put("type", "object");
+			Map<String, Object> searchProperties = new LinkedHashMap<String, Object>();
+			searchProperties.put("pattern", schema("string"));
 			Map<String, Object> glob = schema("array");
 			glob.put("items", schema("string"));
 			glob.put("description", "Optional ripgrep-style glob filters applied only to fragment paths, not artifact ids.");
-			properties.put("glob", glob);
+			searchProperties.put("glob", glob);
 			Map<String, Object> namespace = schema("array");
 			namespace.put("items", schema("string"));
 			namespace.put("description", "Optional artifact namespace filters. Matches the exact namespace and all descendant artifact ids. Configured and policy namespaces are applied first; this argument can only narrow further.");
-			properties.put("namespace", namespace);
-			properties.put("case_sensitive", schema("string"));
-			properties.put("before_context", schema("integer"));
-			properties.put("after_context", schema("integer"));
-			properties.put("context", schema("integer"));
-			inputSchema.put("properties", properties);
-			inputSchema.put("required", Arrays.asList("pattern"));
-			tool.put("inputSchema", inputSchema);
-			result.put("tools", Arrays.asList(tool));
+			searchProperties.put("namespace", namespace);
+			searchProperties.put("case_sensitive", schema("string"));
+			searchProperties.put("before_context", schema("integer"));
+			searchProperties.put("after_context", schema("integer"));
+			searchProperties.put("context", schema("integer"));
+			searchInputSchema.put("properties", searchProperties);
+			searchInputSchema.put("required", Arrays.asList("pattern"));
+			searchTool.put("inputSchema", searchInputSchema);
+			searchTool.put("outputSchema", searchOutputSchema());
+			tools.add(searchTool);
+			Map<String, Object> editTool = new LinkedHashMap<String, Object>();
+			editTool.put("name", EDIT_TOOL_NAME);
+			editTool.put("title", "Edit nabu artifact fragment");
+			editTool.put("description", "Replace exact matches in an editable artifact fragment.");
+			Map<String, Object> editInputSchema = new LinkedHashMap<String, Object>();
+			editInputSchema.put("type", "object");
+			Map<String, Object> editProperties = new LinkedHashMap<String, Object>();
+			editProperties.put("edits", editSchema());
+			editInputSchema.put("properties", editProperties);
+			editInputSchema.put("required", Arrays.asList("edits"));
+			editTool.put("inputSchema", editInputSchema);
+			editTool.put("outputSchema", editOutputSchema());
+			tools.add(editTool);
+			result.put("tools", tools);
 			response.put("result", result);
 			return json(response, null);
 		}
@@ -121,28 +146,122 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!TOOL_NAME.equals(name)) {
+			if (!SEARCH_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name)) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
 			Map<String, Object> arguments = map(params.get("arguments"));
 			Map<String, Object> meta = map(params.get("_meta"));
-			MCPToolCallInput input = bind(arguments, MCPToolCallInput.class);
 			Map<String, Object> result = new LinkedHashMap<String, Object>();
-			List<MCPFragmentSearchResult> results = search(input, meta, configuration);
-			Map<String, Object> structuredContent = optimizeResults(input.getPattern(), results);
-			List<Map<String, String>> contentResult = new ArrayList<Map<String, String>>();
-			Map<String, String> text = new LinkedHashMap<String, String>();
-			text.put("type", "text");
-			text.put("text", buildSummaryText(structuredContent));
-			contentResult.add(text);
-			result.put("content", contentResult);
-			result.put("structuredContent", structuredContent);
+			if (SEARCH_TOOL_NAME.equals(name)) {
+				MCPToolCallInput input = bind(arguments, MCPToolCallInput.class);
+				List<MCPFragmentSearchResult> results = search(input, meta, configuration);
+				Map<String, Object> structuredContent = optimizeResults(input.getPattern(), results);
+				List<Map<String, String>> contentResult = new ArrayList<Map<String, String>>();
+				Map<String, String> text = new LinkedHashMap<String, String>();
+				text.put("type", "text");
+				text.put("text", buildSummaryText(structuredContent));
+				contentResult.add(text);
+				result.put("content", contentResult);
+				result.put("structuredContent", structuredContent);
+			}
+			else {
+				Map<String, Object> structuredContent = editArtifact(arguments, meta, configuration);
+				List<Map<String, String>> contentResult = new ArrayList<Map<String, String>>();
+				Map<String, String> text = new LinkedHashMap<String, String>();
+				text.put("type", "text");
+				text.put("text", buildEditSummaryText(structuredContent));
+				contentResult.add(text);
+				result.put("content", contentResult);
+				result.put("structuredContent", structuredContent);
+			}
 			response.put("result", result);
 			return json(response, null);
 		}
 		response.put("error", error(-32601, "Method not found: " + method));
 		return json(response, null);
+	}
+
+	private Map<String, Object> editArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) throws IOException, ParseException {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		List<Map<String, String>> edits = extractEdits(arguments);
+		List<Map<String, Object>> operations = new ArrayList<Map<String, Object>>();
+		for (Map<String, String> edit : edits) {
+			String artifactId = edit.get("artifact_id");
+			String path = edit.get("path");
+			if (!isAllowedNamespace(artifactId, namespaces)) {
+				throw protocolError("INVALID_PATH", "invalid path " + artifactId + ": path outside allowed namespace");
+			}
+			Node currentNode = server.getRepository().getNode(artifactId);
+			if (currentNode == null) {
+				throw protocolError("INVALID_PATH", "invalid path " + artifactId + ": artifact not found");
+			}
+			Artifact currentArtifact = (Artifact) currentNode.getArtifact();
+			ArtifactFragmentManager<Artifact> currentManager = EAIRepositoryUtils.getArtifactFragmentManager(currentArtifact);
+			if (currentManager == null) {
+				throw protocolError("INVALID_PATH", "invalid path " + artifactId + ": no fragment manager found");
+			}
+			ArtifactFragment currentFragment = findEditableFragment(currentManager, currentArtifact, artifactId, path);
+			String currentContent = currentFragment.getContent();
+			String find = edit.get("find");
+			int matchCount = countMatches(currentContent, find);
+			if (matchCount == 0) {
+				throw protocolError("FIND_NOT_FOUND", "find text not found for " + artifactId + " / " + path);
+			}
+			if (matchCount > 1) {
+				throw protocolError("FIND_NOT_UNIQUE", "find text not unique for " + artifactId + " / " + path);
+			}
+			Map<String, Object> operation = new LinkedHashMap<String, Object>();
+			operation.put("artifactId", artifactId);
+			operation.put("path", path);
+			operation.put("artifact", currentArtifact);
+			operation.put("manager", currentManager);
+			operation.put("before", currentContent);
+			operation.put("after", currentContent.replace(find, edit.get("replace")));
+			operation.put("match_count", matchCount);
+			operations.add(operation);
+		}
+		List<Map<String, Object>> updates = new ArrayList<Map<String, Object>>();
+		int successCount = 0;
+		for (Map<String, Object> operation : operations) {
+			Map<String, Object> update = new LinkedHashMap<String, Object>();
+			String artifactId = (String) operation.get("artifactId");
+			String path = (String) operation.get("path");
+			update.put("artifactId", artifactId);
+			update.put("path", path);
+			update.put("match_count", operation.get("match_count"));
+			try {
+				@SuppressWarnings("unchecked")
+				ArtifactFragmentManager<Artifact> currentManager = (ArtifactFragmentManager<Artifact>) operation.get("manager");
+				Artifact currentArtifact = (Artifact) operation.get("artifact");
+				String before = (String) operation.get("before");
+				String after = (String) operation.get("after");
+				List<Validation<?>> validations = currentManager.updateFragment(currentArtifact, path, before, after);
+				update.put("updated", !hasErrors(validations));
+				if (validations != null && !validations.isEmpty()) {
+					update.put("validations", validationMaps(validations));
+				}
+				if (hasErrors(validations)) {
+					update.put("error", buildValidationMessage(validations));
+				}
+				else {
+					server.getRepository().reload(artifactId);
+					successCount++;
+				}
+			}
+			catch (Exception e) {
+				update.put("updated", false);
+				update.put("error", e.getMessage() == null ? e.getClass().getName() : e.getMessage());
+			}
+			updates.add(update);
+		}
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("count", updates.size());
+		structuredContent.put("updated_count", successCount);
+		structuredContent.put("failed_count", updates.size() - successCount);
+		structuredContent.put("isError", successCount == 0);
+		structuredContent.put("updates", updates);
+		return structuredContent;
 	}
 
 	private List<MCPFragmentSearchResult> search(MCPToolCallInput input, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -196,6 +315,12 @@ public class MCPREST {
 		structuredContent.put("truncated", truncated);
 		structuredContent.put("mode", mode);
 		return structuredContent;
+	}
+
+	private String buildEditSummaryText(Map<String, Object> structuredContent) {
+		Object updatedCount = structuredContent.get("updated_count");
+		Object failedCount = structuredContent.get("failed_count");
+		return "Updated " + updatedCount + " fragments, " + failedCount + " failed";
 	}
 
 	private String buildSummaryText(Map<String, Object> structuredContent) {
@@ -554,6 +679,229 @@ public class MCPREST {
 		error.put("code", code);
 		error.put("message", message);
 		return error;
+	}
+
+	private Map<String, Object> searchOutputSchema() {
+		Map<String, Object> schema = new LinkedHashMap<String, Object>();
+		schema.put("type", "object");
+		Map<String, Object> properties = new LinkedHashMap<String, Object>();
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("type", "object");
+		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
+		structuredProperties.put("results", schema("array"));
+		structuredProperties.put("pattern", schema("string"));
+		structuredProperties.put("count", schema("integer"));
+		structuredProperties.put("total_results", schema("integer"));
+		structuredProperties.put("total_matches", schema("integer"));
+		structuredProperties.put("truncated", schema("boolean"));
+		structuredProperties.put("mode", schema("string"));
+		structuredContent.put("properties", structuredProperties);
+		properties.put("structuredContent", structuredContent);
+		Map<String, Object> content = schema("array");
+		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
+		contentItems.put("type", "object");
+		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
+		contentProperties.put("type", schema("string"));
+		contentProperties.put("text", schema("string"));
+		contentItems.put("properties", contentProperties);
+		contentItems.put("required", Arrays.asList("type", "text"));
+		content.put("items", contentItems);
+		properties.put("content", content);
+		schema.put("properties", properties);
+		return schema;
+	}
+
+	private Map<String, Object> editOutputSchema() {
+		Map<String, Object> schema = new LinkedHashMap<String, Object>();
+		schema.put("type", "object");
+		Map<String, Object> properties = new LinkedHashMap<String, Object>();
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("type", "object");
+		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
+		structuredProperties.put("count", schema("integer"));
+		structuredProperties.put("updated_count", schema("integer"));
+		structuredProperties.put("failed_count", schema("integer"));
+		structuredProperties.put("isError", schema("boolean"));
+		Map<String, Object> updates = schema("array");
+		Map<String, Object> updateItem = new LinkedHashMap<String, Object>();
+		updateItem.put("type", "object");
+		Map<String, Object> updateProperties = new LinkedHashMap<String, Object>();
+		updateProperties.put("artifactId", schema("string"));
+		updateProperties.put("path", schema("string"));
+		updateProperties.put("match_count", schema("integer"));
+		updateProperties.put("updated", schema("boolean"));
+		updateProperties.put("error", schema("string"));
+		updateProperties.put("validations", schema("array"));
+		updateItem.put("properties", updateProperties);
+		updates.put("items", updateItem);
+		structuredProperties.put("updates", updates);
+		structuredContent.put("properties", structuredProperties);
+		properties.put("structuredContent", structuredContent);
+		Map<String, Object> content = schema("array");
+		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
+		contentItems.put("type", "object");
+		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
+		contentProperties.put("type", schema("string"));
+		contentProperties.put("text", schema("string"));
+		contentItems.put("properties", contentProperties);
+		contentItems.put("required", Arrays.asList("type", "text"));
+		content.put("items", contentItems);
+		properties.put("content", content);
+		schema.put("properties", properties);
+		return schema;
+	}
+
+	private Map<String, Object> editSchema() {
+		Map<String, Object> schema = new LinkedHashMap<String, Object>();
+		schema.put("type", "array");
+		schema.put("description", "List of exact find/replace edits to apply in order.");
+		Map<String, Object> items = new LinkedHashMap<String, Object>();
+		items.put("type", "object");
+		Map<String, Object> properties = new LinkedHashMap<String, Object>();
+		properties.put("artifact_id", propertySchema("string", "Artifact id containing the fragment."));
+		properties.put("path", propertySchema("string", "Path to the fragment inside the artifact."));
+		properties.put("find", propertySchema("string", "Exact text to find (must match exactly once)."));
+		properties.put("replace", propertySchema("string", "Replacement text."));
+		items.put("properties", properties);
+		items.put("required", Arrays.asList("artifact_id", "path", "find", "replace"));
+		schema.put("items", items);
+		return schema;
+	}
+
+	private Map<String, Object> propertySchema(String type, String description) {
+		Map<String, Object> schema = schema(type);
+		schema.put("description", description);
+		return schema;
+	}
+
+	private List<Map<String, String>> extractEdits(Map<String, Object> arguments) {
+		if (arguments == null || !arguments.containsKey("edits")) {
+			throw protocolError("MISSING_EDITS", "edits is required");
+		}
+		Object rawEdits = unwrap(arguments.get("edits"));
+		if (!(rawEdits instanceof List)) {
+			throw protocolError("INVALID_EDITS", "edits must be an array");
+		}
+		List<?> values = (List<?>) rawEdits;
+		if (values.isEmpty()) {
+			throw protocolError("EMPTY_EDITS", "edits is empty");
+		}
+		List<Map<String, String>> edits = new ArrayList<Map<String, String>>();
+		for (int i = 0; i < values.size(); i++) {
+			if (!(values.get(i) instanceof Map)) {
+				throw protocolError("INVALID_EDITS", "edit must be an object at index " + i);
+			}
+			Map<String, Object> edit = map(values.get(i));
+			String artifactId = requiredString(edit, "artifact_id", "MISSING_ARTIFACT_ID");
+			String path = requiredString(edit, "path", "MISSING_PATH");
+			String find = requiredString(edit, "find", "MISSING_FIND");
+			String replace = requiredString(edit, "replace", "MISSING_REPLACE");
+			if (find.isEmpty()) {
+				throw protocolError("FIND_EMPTY", "find text is empty at index " + i);
+			}
+			Map<String, String> normalized = new LinkedHashMap<String, String>();
+			normalized.put("artifact_id", artifactId);
+			normalized.put("path", path);
+			normalized.put("find", find);
+			normalized.put("replace", replace);
+			edits.add(normalized);
+		}
+		return edits;
+	}
+
+	private String requiredString(Map<String, Object> values, String key, String code) {
+		String value = values == null ? null : string(values.get(key));
+		if (value == null) {
+			throw protocolError(code, key + " is required");
+		}
+		return value;
+	}
+
+	private ArtifactFragment findEditableFragment(ArtifactFragmentManager<Artifact> manager, Artifact artifact, String artifactId, String path) {
+		List<ArtifactFragment> fragments = manager.listFragments(artifact);
+		if (fragments != null) {
+			for (ArtifactFragment fragment : fragments) {
+				if (fragment != null && path.equals(fragment.getPath())) {
+					if (!fragment.isEditable()) {
+						throw protocolError("INVALID_PATH", "invalid path " + artifactId + ": fragment is not editable");
+					}
+					return fragment;
+				}
+			}
+		}
+		throw protocolError("INVALID_PATH", "invalid path " + artifactId + ": fragment not found");
+	}
+
+	private boolean isAllowedNamespace(String artifactId, List<String> namespaces) {
+		if (namespaces == null || namespaces.isEmpty()) {
+			return true;
+		}
+		for (String namespace : namespaces) {
+			if (artifactId.equals(namespace) || artifactId.startsWith(namespace + ".")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private int countMatches(String content, String find) {
+		int count = 0;
+		int index = 0;
+		while ((index = content.indexOf(find, index)) >= 0) {
+			count++;
+			index += find.length();
+		}
+		return count;
+	}
+
+	private boolean hasErrors(List<Validation<?>> validations) {
+		if (validations == null) {
+			return false;
+		}
+		for (Validation<?> validation : validations) {
+			if (validation != null && validation.getSeverity() != null && validation.getSeverity().ordinal() >= Severity.ERROR.ordinal()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private String buildValidationMessage(List<Validation<?>> validations) {
+		if (validations == null || validations.isEmpty()) {
+			return "fragment update failed";
+		}
+		StringBuilder builder = new StringBuilder();
+		for (Validation<?> validation : validations) {
+			if (validation == null) {
+				continue;
+			}
+			if (builder.length() > 0) {
+				builder.append("; ");
+			}
+			builder.append(validation.getMessage());
+		}
+		return builder.length() == 0 ? "fragment update failed" : builder.toString();
+	}
+
+	private List<Map<String, Object>> validationMaps(List<Validation<?>> validations) {
+		List<Map<String, Object>> mapped = new ArrayList<Map<String, Object>>();
+		for (Validation<?> validation : validations) {
+			if (validation == null) {
+				continue;
+			}
+			Map<String, Object> single = new LinkedHashMap<String, Object>();
+			single.put("severity", validation.getSeverity() == null ? null : validation.getSeverity().name());
+			single.put("code", validation.getCode());
+			single.put("message", validation.getMessage());
+			single.put("description", validation.getDescription());
+			single.put("context", validation.getContext());
+			mapped.add(single);
+		}
+		return mapped;
+	}
+
+	private HTTPException protocolError(String code, String message) {
+		return new HTTPException(400, message + " [" + code + "]");
 	}
 
 	private Map<String, Object> schema(String type) {
