@@ -296,6 +296,7 @@ public class Standalone {
 		boolean forceRemoteRepository = Boolean.parseBoolean(getArgument("forceRemoteRepository", "true", args));
 		boolean updateMavenSnapshots = Boolean.parseBoolean(getArgument("updateMavenSnapshots", "false", args));
 		boolean enableMetrics = Boolean.parseBoolean(getArgument("enableMetrics", "true", args));
+		boolean enableMCP = Boolean.parseBoolean(getArgument("enableMCP", "false", args));
 		boolean historizeGauges = Boolean.parseBoolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
 		boolean anonymousIsRoot = Boolean.parseBoolean(getArgument("anonymousIsRoot", "true", args));
 		boolean startup = Boolean.parseBoolean(getArgument("startup", "true", args));
@@ -393,6 +394,7 @@ public class Standalone {
 		}
 		server.setDeployments(deploymentRoot);
 		server.setEnableSnapshots(enableSnapshots);
+		server.setEnableMCP(enableMCP);
 		// make sure we also use the correct pool here, otherwise the thread context is wrong and we might not be able to access libraries available in the repository
 		// we had this with an invoke $all to bringOnline where startup listeners failed to for example find the sftp library, the jdbc pool artifact etc etc
 		server.setPool(Executors.newFixedThreadPool(pool, new RepositoryThreadFactory(repositoryInstance)));

@@ -54,6 +54,8 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import javax.sql.DataSource;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,8 +78,12 @@ import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.server.api.ServerListener;
 import be.nabu.eai.server.api.ServerListener.Phase;
+import be.nabu.eai.server.fragments.FileSystemFragmentIndexBackend;
+import be.nabu.eai.server.fragments.FragmentIndexService;
+import be.nabu.eai.server.fragments.JdbcFragmentIndexBackend;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
+import be.nabu.libs.artifacts.api.DataSourceProviderArtifact;
 import be.nabu.libs.artifacts.api.OfflineableArtifact;
 import be.nabu.libs.artifacts.api.RestartableArtifact;
 import be.nabu.libs.artifacts.api.StartableArtifact;
@@ -181,6 +187,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private ResourceContainer<?> deployments;
 	private Appender<ILoggingEvent> appender;
 	private List<ServerListener> serverListeners;
+	private FragmentIndexService fragmentIndexService;
 	private HTTPServer httpServer;
 	private Thread queueExecutionThread;
 	private ExecutorService pool;
@@ -192,6 +199,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private Map<String, BatchResultFuture> futures = new HashMap<String, BatchResultFuture>();
 	private Runnable startedListener;
 	private boolean selfMonitor;
+	private boolean enableMCP;
 	
 	private List<Runnable> shutdownActions = new ArrayList<Runnable>();
 	
@@ -696,6 +704,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 							}
 							
 							Collections.sort(serverListeners, new ServerListener.ServerListenerComparator());
+							initializeFragmentIndexService();
 							
 							// all the artifacts are loaded but not yet started
 							for (ServerListener serverListener : serverListeners) {
@@ -1091,6 +1100,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 
 	public MavenRepository getRepository() {
 		return repository;
+	}
+	
+	public FragmentIndexService getFragmentIndexService() {
+		return fragmentIndexService;
 	}
 
 	@Override
@@ -1582,6 +1595,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	public void setDisableStartup(boolean disableStartup) {
 		this.disableStartup = disableStartup;
 	}
+	
+	public boolean isEnableMCP() {
+		return enableMCP;
+	}
+	
+	public void setEnableMCP(boolean enableMCP) {
+		this.enableMCP = enableMCP;
+	}
 
 	public Date getStartupTime() {
 		return startupTime;
@@ -1707,6 +1728,50 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	
 	public void addShutdownAction(Runnable runnable) {
 		shutdownActions.add(runnable);
+	}
+	
+	private void initializeFragmentIndexService() {
+		if (!enableMCP) {
+			logger.info("MCP disabled, fragment indexing is disabled");
+			fragmentIndexService = null;
+			return;
+		}
+		String dataSourceId = System.getProperty("be.nabu.eai.server.fragments.datasource");
+		if (dataSourceId != null && !dataSourceId.trim().isEmpty()) {
+			Artifact resolved = repository.resolve(dataSourceId);
+			if (!(resolved instanceof DataSourceProviderArtifact)) {
+				logger.warn("Fragment indexing disabled, configured datasource does not resolve to a DataSourceProviderArtifact: " + dataSourceId);
+				fragmentIndexService = null;
+				return;
+			}
+			DataSource dataSource = ((DataSourceProviderArtifact) resolved).getDataSource();
+			if (dataSource == null) {
+				logger.warn("Fragment indexing disabled, configured datasource returned null: " + dataSourceId);
+				fragmentIndexService = null;
+				return;
+			}
+			fragmentIndexService = new FragmentIndexService(repository, new JdbcFragmentIndexBackend(dataSource));
+			logger.info("Using database fragment index backend: " + dataSourceId);
+		}
+		else {
+			String folder = System.getProperty(FileSystemFragmentIndexBackend.FRAGMENT_INDEX_DIRECTORY);
+			if (folder == null || folder.trim().isEmpty()) {
+				String property = System.getProperty("user.home");
+				File target = property == null ? new File(".") : new File(property);
+				folder = new File(new File(target, ".nabu"), "fragments").getAbsolutePath();
+			}
+			fragmentIndexService = new FragmentIndexService(repository, new FileSystemFragmentIndexBackend(new File(folder).toPath()));
+			logger.info("Using filesystem fragment index backend: " + folder);
+		}
+		fragmentIndexService.initialize();
+		fragmentIndexService.rebuild();
+		repository.getEventDispatcher().subscribe(NodeEvent.class, new EventHandler<NodeEvent, Void>() {
+			@Override
+			public Void handle(NodeEvent event) {
+				fragmentIndexService.handle(event);
+				return null;
+			}
+		});
 	}
 	
 }
