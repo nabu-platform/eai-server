@@ -1,27 +1,44 @@
 package be.nabu.eai.server.rest;
 
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.text.ParseException;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.api.ArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager.ReviewResource;
+import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.libs.artifacts.api.Artifact;
+import be.nabu.libs.authentication.impl.ImpersonateToken;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -33,12 +50,23 @@ import javax.ws.rs.core.MediaType;
 import be.nabu.eai.server.Server;
 import be.nabu.eai.server.fragments.FragmentIndexService;
 import be.nabu.eai.server.fragments.FragmentSearch;
+import be.nabu.eai.server.fragments.MCPUtils;
+import be.nabu.libs.authentication.api.Token;
 import be.nabu.libs.cluster.api.ClusterMap;
+import be.nabu.libs.services.ServiceRuntime;
+import be.nabu.libs.services.api.DefinedService;
+import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.FeaturedExecutionContext;
+import be.nabu.libs.services.api.Service;
+import be.nabu.libs.services.api.ServiceException;
+import be.nabu.libs.services.api.ServiceResult;
+import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
+import be.nabu.libs.types.binding.xml.XMLBinding;
 import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.map.MapContent;
 import be.nabu.libs.types.map.MapContentWrapper;
@@ -49,7 +77,6 @@ import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.Header;
 import be.nabu.utils.mime.impl.MimeHeader;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
-
 @Path("/mcp")
 public class MCPREST {
 
@@ -82,6 +109,8 @@ public class MCPREST {
 	private static final String EDIT_TOOL_NAME = "edit_nabu_artifact_fragment";
 	private static final String WRITE_TOOL_NAME = "write_nabu_artifact_fragment";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_artifact_fragment_skills";
+	private static final String INVOKE_TOOL_NAME = "invoke_nabu_service";
+	private static final String TRACE_SEARCH_TOOL_NAME = "search_nabu_service_trace";
 	private static final String MCP_SESSION_ID = "MCP-Session-Id";
 	private static final String SESSION_MAP = "mcp.rest.sessions";
 	private static final String REVIEW_RESOURCE_MAP = "mcp.rest.review.resources";
@@ -89,6 +118,9 @@ public class MCPREST {
 	private static final int MAX_RESULT_BYTES = 32000;
 	private static final int SUMMARY_TOP = 20;
 	private static final long SESSION_TIMEOUT = 24L * 60L * 60L * 1000L;
+	private static final DateTimeFormatter TRACE_TIME_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC);
+	private static final String TRACE_INCLUDE_LINKS = "mcp.trace.include_links";
+	private static final ConcurrentMap<Class<?>, be.nabu.eai.repository.api.MCPTraceProvider> TRACE_PROVIDER_CACHE = new ConcurrentHashMap<Class<?>, be.nabu.eai.repository.api.MCPTraceProvider>();
 
 	@Context
 	private Server server;
@@ -154,6 +186,10 @@ public class MCPREST {
 			searchTool.put("name", SEARCH_TOOL_NAME);
 			searchTool.put("title", "Search nabu artifacts");
 			searchTool.put("description", "Search indexed artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths.");
+			Map<String, Object> searchAnnotations = new LinkedHashMap<String, Object>();
+			searchAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			searchAnnotations.put("intentTemplate", "Search for {pattern} [in namespaces {namespace}] [with glob {glob}] [context {context}] [before {before_context}] [after {after_context}]");
+			searchTool.put("annotations", searchAnnotations);
 			Map<String, Object> searchInputSchema = new LinkedHashMap<String, Object>();
 			searchInputSchema.put("type", "object");
 			Map<String, Object> searchProperties = new LinkedHashMap<String, Object>();
@@ -179,6 +215,10 @@ public class MCPREST {
 			findTool.put("name", FIND_TOOL_NAME);
 			findTool.put("title", "Find nabu artifact fragments");
 			findTool.put("description", "Find indexed nabu artifact fragments using path and artifact filters.");
+			Map<String, Object> findAnnotations = new LinkedHashMap<String, Object>();
+			findAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			findAnnotations.put("intentTemplate", "Find artifact fragments [matching {pattern}] [in artifact {artifact_id}] [at path {path}] [limit {limit}]");
+			findTool.put("annotations", findAnnotations);
 			Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
 			findInputSchema.put("type", "object");
 			Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
@@ -197,6 +237,10 @@ public class MCPREST {
 			readTool.put("name", READ_TOOL_NAME);
 			readTool.put("title", "Read nabu artifact fragment");
 			readTool.put("description", "Read lines from an indexed nabu artifact fragment.");
+			Map<String, Object> readAnnotations = new LinkedHashMap<String, Object>();
+			readAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			readAnnotations.put("intentTemplate", "Read artifact {artifact_id} fragment {path} [from line {start_line}] [limit {limit}]");
+			readTool.put("annotations", readAnnotations);
 			Map<String, Object> readInputSchema = new LinkedHashMap<String, Object>();
 			readInputSchema.put("type", "object");
 			Map<String, Object> readProperties = new LinkedHashMap<String, Object>();
@@ -213,9 +257,11 @@ public class MCPREST {
 			editTool.put("name", EDIT_TOOL_NAME);
 			editTool.put("title", "Edit nabu artifact fragment");
 			editTool.put("description", "Replace exact matches in an editable artifact fragment.");
-			Map<String, Object> annotations = new LinkedHashMap<String, Object>();
-			annotations.put("preview", true);
-			editTool.put("annotations", annotations);
+			Map<String, Object> editAnnotations = new LinkedHashMap<String, Object>();
+			editAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+			editAnnotations.put("preview", true);
+			editAnnotations.put("intentTemplate", "Edit [{edits.path}] in artifact [{edits.artifact_id}]");
+			editTool.put("annotations", editAnnotations);
 			Map<String, Object> editInputSchema = new LinkedHashMap<String, Object>();
 			editInputSchema.put("type", "object");
 			Map<String, Object> editProperties = new LinkedHashMap<String, Object>();
@@ -229,7 +275,11 @@ public class MCPREST {
 			writeTool.put("name", WRITE_TOOL_NAME);
 			writeTool.put("title", "Write nabu artifact fragment");
 			writeTool.put("description", "Use this tool to overwrite, append, or prepend a whole editable artifact fragment.");
-			writeTool.put("annotations", annotations);
+			Map<String, Object> writeAnnotations = new LinkedHashMap<String, Object>();
+			writeAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+			writeAnnotations.put("preview", true);
+			writeAnnotations.put("intentTemplate", "Write artifact {artifact_id} fragment {path} [mode {mode}]");
+			writeTool.put("annotations", writeAnnotations);
 			Map<String, Object> writeInputSchema = new LinkedHashMap<String, Object>();
 			writeInputSchema.put("type", "object");
 			Map<String, Object> writeProperties = new LinkedHashMap<String, Object>();
@@ -248,6 +298,9 @@ public class MCPREST {
 			skillsTool.put("name", SKILLS_TOOL_NAME);
 			skillsTool.put("title", "Get nabu artifact fragment skills");
 			skillsTool.put("description", "Fetch artifact and fragment-specific editing skills. Use this whenever you want to edit a nabu artifact fragment type you do not know yet. You can request multiple artifact/fragment combinations in one call.");
+			Map<String, Object> skillsAnnotations = new LinkedHashMap<String, Object>();
+			skillsAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			skillsTool.put("annotations", skillsAnnotations);
 			Map<String, Object> skillsInputSchema = new LinkedHashMap<String, Object>();
 			skillsInputSchema.put("type", "object");
 			Map<String, Object> skillsProperties = new LinkedHashMap<String, Object>();
@@ -268,6 +321,55 @@ public class MCPREST {
 			skillsInputSchema.put("required", Arrays.asList("requests"));
 			skillsTool.put("inputSchema", skillsInputSchema);
 			tools.add(skillsTool);
+			Map<String, Object> invokeTool = new LinkedHashMap<String, Object>();
+			invokeTool.put("name", INVOKE_TOOL_NAME);
+			invokeTool.put("title", "Invoke nabu service");
+			invokeTool.put("description", "Invoke a nabu service through the same execution path as ServerREST, with optional one-off trace capture.");
+			Map<String, Object> invokeAnnotations = new LinkedHashMap<String, Object>();
+			invokeAnnotations.put("scopes", Arrays.asList("execute:nabu:service"));
+			invokeAnnotations.put("intentTemplate", "Invoking {service_id}");
+			invokeTool.put("annotations", invokeAnnotations);
+			Map<String, Object> invokeInputSchema = new LinkedHashMap<String, Object>();
+			invokeInputSchema.put("type", "object");
+			Map<String, Object> invokeProperties = new LinkedHashMap<String, Object>();
+			invokeProperties.put("service_id", propertySchema("string", "Service id to invoke."));
+			invokeProperties.put("run_as", propertySchema("string", "Optional user alias to impersonate for this invoke."));
+			invokeProperties.put("run_as_realm", propertySchema("string", "Optional realm for run_as."));
+			Map<String, Object> features = schema("array");
+			features.put("items", schema("string"));
+			features.put("description", "Optional enabled features for the execution context.");
+			invokeProperties.put("features", features);
+			invokeProperties.put("service_context", propertySchema("string", "Optional service context header value."));
+			invokeProperties.put("trace", propertySchema("boolean", "If true, stream a trace xml file for this invoke. Default: false."));
+			Map<String, Object> input = new LinkedHashMap<String, Object>();
+			input.put("description", "Arbitrary input data for the service. This is intentionally untyped so any valid service input can be passed.");
+			invokeProperties.put("input", input);
+			invokeInputSchema.put("properties", invokeProperties);
+			invokeInputSchema.put("required", Arrays.asList("service_id"));
+			invokeTool.put("inputSchema", invokeInputSchema);
+			tools.add(invokeTool);
+			Map<String, Object> traceSearchTool = new LinkedHashMap<String, Object>();
+			traceSearchTool.put("name", TRACE_SEARCH_TOOL_NAME);
+			traceSearchTool.put("title", "Search nabu service trace");
+			traceSearchTool.put("description", "Run XPath queries against a streamed nabu service trace xml file and return stringified xml results.");
+			Map<String, Object> traceSearchAnnotations = new LinkedHashMap<String, Object>();
+			traceSearchAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			traceSearchTool.put("annotations", traceSearchAnnotations);
+			Map<String, Object> traceSearchInputSchema = new LinkedHashMap<String, Object>();
+			traceSearchInputSchema.put("type", "object");
+			Map<String, Object> traceSearchProperties = new LinkedHashMap<String, Object>();
+			traceSearchProperties.put("trace_id", propertySchema("string", "Trace id to search."));
+			Map<String, Object> queries = schema("array");
+			queries.put("items", schema("string"));
+			queries.put("description", "XPath expressions to evaluate against the trace xml.");
+			traceSearchProperties.put("queries", queries);
+			traceSearchProperties.put("depth", propertySchema("integer", "Nested invoke depth to include in matched results. Default: 1."));
+			traceSearchProperties.put("limit", propertySchema("integer", "Maximum number of xpath hits to return per query. Default: 20."));
+			traceSearchProperties.put("offset", propertySchema("integer", "Number of xpath hits to skip per query. Default: 0."));
+			traceSearchInputSchema.put("properties", traceSearchProperties);
+			traceSearchInputSchema.put("required", Arrays.asList("trace_id", "queries"));
+			traceSearchTool.put("inputSchema", traceSearchInputSchema);
+			tools.add(traceSearchTool);
 			result.put("tools", tools);
 			response.put("result", result);
 			return json(response, null);
@@ -276,7 +378,7 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name)) {
+			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
@@ -295,6 +397,12 @@ public class MCPREST {
 			}
 			else if (SKILLS_TOOL_NAME.equals(name)) {
 				toolResult = skillsToolResult(arguments);
+			}
+			else if (INVOKE_TOOL_NAME.equals(name)) {
+				toolResult = invokeToolResult(arguments);
+			}
+			else if (TRACE_SEARCH_TOOL_NAME.equals(name)) {
+				toolResult = traceSearchToolResult(arguments);
 			}
 			else {
 				boolean preview = isPreview(meta == null ? null : meta.get("preview"));
@@ -319,7 +427,7 @@ public class MCPREST {
 		List<MCPFragmentSearchResult> results = search(input, meta, configuration);
 		Map<String, Object> structuredContent = optimizeResults(input.getPattern(), results);
 		List<Map<String, String>> content = textContent(buildSummaryText(structuredContent));
-		return new ToolResult(structuredContent, content, null);
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildSearchDisplayMessage(structuredContent)));
 	}
 
 	private ToolResult skillsToolResult(Map<String, Object> arguments) {
@@ -328,7 +436,83 @@ public class MCPREST {
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 		structuredContent.put("markdown", markdown);
 		structuredContent.put("count", requests.size());
-		return new ToolResult(structuredContent, textContent(markdown), null);
+		return new ToolResult(structuredContent, textContent(markdown), buildToolMeta(null, buildSkillsDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult invokeToolResult(Map<String, Object> arguments) throws IOException, ParseException {
+		String serviceId = requiredString(arguments, "service_id", "MISSING_SERVICE_ID");
+		DefinedService service = (DefinedService) server.getRepository().resolve(serviceId);
+		if (service == null) {
+			throw protocolError("UNKNOWN_SERVICE", "Can not find service: " + serviceId);
+		}
+		Map<String, Object> input = map(arguments.get("input"));
+		ExecutionContext executionContext = server.getRepository().newExecutionContext(resolvePrincipal(arguments));
+		List<String> features = stringList(arguments.get("features"));
+		if (features != null && !features.isEmpty() && executionContext instanceof FeaturedExecutionContext) {
+			((FeaturedExecutionContext) executionContext).getEnabledFeatures().addAll(features);
+		}
+		String serviceContext = string(arguments.get("service_context"));
+		Map<String, Object> previousGlobalContext = ServiceRuntime.getGlobalContext();
+		TraceRun traceRun = null;
+		Instant started = Instant.now();
+		try {
+			ServiceRuntime.setGlobalContext(new LinkedHashMap<String, Object>());
+			ServiceRuntime.getGlobalContext().put("service.context", serviceContext == null || serviceContext.trim().isEmpty() ? serviceId : serviceContext);
+			ServiceRuntime.getGlobalContext().put("service.source", "mcp.invoke");
+			if (isPreview(arguments.get("trace"))) {
+				traceRun = TraceRun.start(server.getRepository(), service);
+				if (executionContext.getServiceContext().getServiceTrackerProvider() instanceof be.nabu.eai.repository.api.ModifiableServiceRuntimeTrackerProvider) {
+					((be.nabu.eai.repository.api.ModifiableServiceRuntimeTrackerProvider) executionContext.getServiceContext().getServiceTrackerProvider()).addTracker(service, traceRun.tracker, true);
+				}
+				else {
+					throw protocolError("TRACE_UNSUPPORTED", "Execution context does not support one-off trackers");
+				}
+			}
+			ComplexContent serviceInput = bindServiceInput(service, input);
+			ServiceResult serviceResult = server.getRepository().getServiceRunner().run(service, executionContext, serviceInput).get();
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("serviceId", serviceId);
+			structuredContent.put("started", TRACE_TIME_FORMATTER.format(started));
+			structuredContent.put("stopped", TRACE_TIME_FORMATTER.format(Instant.now()));
+			structuredContent.put("trace", traceRun != null);
+			if (traceRun != null) {
+				structuredContent.put("traceId", traceRun.traceId);
+			}
+			if (serviceResult.getException() != null) {
+				structuredContent.put("isError", true);
+				structuredContent.put("exception", stacktrace(serviceResult.getException()));
+				return new ToolResult(structuredContent, textContent(buildInvokeFailureText(serviceId, serviceResult.getException())), buildToolMeta(null, buildInvokeDisplayMessage(structuredContent)));
+			}
+			Object output = unwrap(serviceResult.getOutput());
+			structuredContent.put("isError", false);
+			structuredContent.put("output", output);
+			return new ToolResult(structuredContent, textContent(buildInvokeSummaryText(structuredContent)), buildToolMeta(null, buildInvokeDisplayMessage(structuredContent)));
+		}
+		catch (HTTPException e) {
+			throw e;
+		}
+		catch (Exception e) {
+			throw new IOException(e);
+		}
+		finally {
+			if (traceRun != null) {
+				traceRun.close();
+			}
+			ServiceRuntime.setGlobalContext(previousGlobalContext);
+		}
+	}
+
+	private ToolResult traceSearchToolResult(Map<String, Object> arguments) throws IOException {
+		String traceId = requiredString(arguments, "trace_id", "MISSING_TRACE_ID");
+		List<String> queries = stringList(arguments.get("queries"));
+		if (queries == null || queries.isEmpty()) {
+			throw protocolError("MISSING_QUERIES", "At least one xpath query is required");
+		}
+		int depth = Math.max(0, integer(arguments.get("depth"), 1));
+		int limit = Math.max(1, integer(arguments.get("limit"), 20));
+		int offset = Math.max(0, integer(arguments.get("offset"), 0));
+		Map<String, Object> structuredContent = searchTrace(traceId, queries, depth, limit, offset);
+		return new ToolResult(structuredContent, textContent(buildTraceSearchSummaryText(structuredContent)), buildToolMeta(null, buildTraceSearchDisplayMessage(structuredContent)));
 	}
 
 	private String buildSkillsMarkdown(List<Map<String, Object>> requests) {
@@ -425,26 +609,26 @@ public class MCPREST {
 	private ToolResult findToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		Map<String, Object> structuredContent = findArtifactFragments(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(buildFindSummaryText(structuredContent));
-		return new ToolResult(structuredContent, content, null);
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildFindDisplayMessage(structuredContent)));
 	}
 
 	private ToolResult readToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		Map<String, Object> structuredContent = readArtifact(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(buildReadSummaryText(structuredContent));
-		return new ToolResult(structuredContent, content, null);
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildReadDisplayMessage(structuredContent)));
 	}
 
 	private ToolResult editToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		EditArtifactResult editResult = editArtifact(arguments, meta, configuration, preview);
 		List<Map<String, String>> content = textContent(buildEditSummaryText(editResult.structuredContent));
-		Map<String, Object> toolMeta = buildToolMeta(editResult.resourceUri);
+		Map<String, Object> toolMeta = buildToolMeta(editResult.resourceUri, buildEditDisplayMessage(editResult.structuredContent));
 		return new ToolResult(editResult.structuredContent, content, toolMeta);
 	}
 
 	private ToolResult writeToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		EditArtifactResult writeResult = writeArtifact(arguments, meta, configuration, preview);
 		List<Map<String, String>> content = textContent(buildWriteSummaryText(writeResult.structuredContent));
-		Map<String, Object> toolMeta = buildToolMeta(writeResult.resourceUri);
+		Map<String, Object> toolMeta = buildToolMeta(writeResult.resourceUri, buildWriteDisplayMessage(writeResult.structuredContent));
 		return new ToolResult(writeResult.structuredContent, content, toolMeta);
 	}
 
@@ -863,6 +1047,66 @@ public class MCPREST {
 			builder.append(" (").append(mode).append(" output)");
 		}
 		return builder.toString();
+	}
+
+	private String buildSearchDisplayMessage(Map<String, Object> structuredContent) {
+		Number totalResults = (Number) structuredContent.get("total_results");
+		if (totalResults == null || totalResults.intValue() == 0) {
+			return "No artifact fragments matched the search.";
+		}
+		return "Found " + totalResults.intValue() + " matching artifact fragment" + (totalResults.intValue() == 1 ? "." : "s.");
+	}
+
+	private String buildSkillsDisplayMessage(Map<String, Object> structuredContent) {
+		Number count = (Number) structuredContent.get("count");
+		int total = count == null ? 0 : count.intValue();
+		return "Loaded editing guidance for " + total + " artifact type" + (total == 1 ? "." : "s.");
+	}
+
+	private String buildInvokeDisplayMessage(Map<String, Object> structuredContent) {
+		String serviceId = string(structuredContent.get("serviceId"));
+		boolean isError = isPreview(structuredContent.get("isError"));
+		return (isError ? "Service failed: " : "Service invoked: ") + serviceId;
+	}
+
+	private String buildTraceSearchDisplayMessage(Map<String, Object> structuredContent) {
+		Number count = (Number) structuredContent.get("count");
+		int total = count == null ? 0 : count.intValue();
+		return "Trace search returned " + total + " result" + (total == 1 ? "." : "s.");
+	}
+
+	private String buildFindDisplayMessage(Map<String, Object> structuredContent) {
+		Number count = (Number) structuredContent.get("count");
+		int total = count == null ? 0 : count.intValue();
+		if (total == 0) {
+			return "No artifact fragments were found.";
+		}
+		return "Found " + total + " artifact fragment" + (total == 1 ? "." : "s.");
+	}
+
+	private String buildReadDisplayMessage(Map<String, Object> structuredContent) {
+		String artifactId = string(structuredContent.get("artifact_id"));
+		String path = string(structuredContent.get("path"));
+		if ("EMPTY_RANGE".equals(structuredContent.get("code"))) {
+			return "No lines available in " + path + " for artifact " + artifactId + ".";
+		}
+		return "Read " + path + " from artifact " + artifactId + ".";
+	}
+
+	private String buildEditDisplayMessage(Map<String, Object> structuredContent) {
+		Object count = structuredContent.get("count");
+		String path = string(structuredContent.get("path"));
+		boolean preview = isPreview(structuredContent.get("preview"));
+		if (path != null) {
+			return (preview ? "Prepared preview for " : "Updated ") + path + ".";
+		}
+		return (preview ? "Prepared preview for " : "Updated ") + count + " artifact fragment" + ("1".equals(String.valueOf(count)) ? "." : "s.");
+	}
+
+	private String buildWriteDisplayMessage(Map<String, Object> structuredContent) {
+		String path = string(structuredContent.get("path"));
+		boolean preview = isPreview(structuredContent.get("preview"));
+		return (preview ? "Prepared preview for " : "Wrote ") + path + ".";
 	}
 
 	private int countMatches(List<MCPFragmentSearchResult> results) {
@@ -1289,7 +1533,14 @@ public class MCPREST {
 	}
 
 	private Map<String, Object> buildToolMeta(String resourceUri) {
+		return buildToolMeta(resourceUri, null);
+	}
+
+	private Map<String, Object> buildToolMeta(String resourceUri, String displayMessage) {
 		Map<String, Object> meta = new LinkedHashMap<String, Object>();
+		if (displayMessage != null && !displayMessage.trim().isEmpty()) {
+			meta.put("displayMessage", displayMessage);
+		}
 		if (resourceUri != null && !resourceUri.trim().isEmpty()) {
 			Map<String, Object> ui = new LinkedHashMap<String, Object>();
 			ui.put("resourceUri", resourceUri);
@@ -1519,6 +1770,258 @@ public class MCPREST {
 		return schema;
 	}
 
+	private ComplexContent bindServiceInput(DefinedService service, Map<String, Object> input) throws IOException, ParseException {
+		if (service.getServiceInterface().getInputDefinition() == null) {
+			return null;
+		}
+		if (input == null) {
+			return service.getServiceInterface().getInputDefinition().newInstance();
+		}
+		byte[] marshalled = marshal(input);
+		JSONBinding binding = new JSONBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
+		binding.setEnableMapSupport(true);
+		binding.setAllowDynamicElements(true);
+		binding.setAddDynamicElementDefinitions(true);
+		return binding.unmarshal(IOUtils.toInputStream(IOUtils.wrap(marshalled, true)), new Window[0]);
+	}
+
+	private Token resolvePrincipal(Map<String, Object> arguments) {
+		String runAs = string(arguments.get("run_as"));
+		if (runAs == null || runAs.trim().isEmpty()) {
+			return server.isAnonymousIsRoot() ? SystemPrincipal.ROOT : null;
+		}
+		return new ImpersonateToken(null, string(arguments.get("run_as_realm")), runAs);
+	}
+
+	private String buildInvokeSummaryText(Map<String, Object> structuredContent) {
+		String serviceId = string(structuredContent.get("serviceId"));
+		boolean isError = isPreview(structuredContent.get("isError"));
+		StringBuilder builder = new StringBuilder();
+		builder.append(isError ? "Invocation failed: " : "Invocation succeeded: ").append(serviceId);
+		if (structuredContent.get("traceId") != null) {
+			builder.append("\ntrace_id: ").append(structuredContent.get("traceId"));
+		}
+		return builder.toString();
+	}
+
+	private String buildTraceSearchSummaryText(Map<String, Object> structuredContent) {
+		return "Trace query count: " + structuredContent.get("count") + "\ntruncated: " + structuredContent.get("truncated");
+	}
+
+	private String buildInvokeFailureText(String serviceId, Throwable exception) {
+		StringBuilder builder = new StringBuilder();
+		builder.append("Service invocation failed for ").append(serviceId);
+		builder.append("\n").append(buildExceptionMessageChain(exception));
+		return builder.toString();
+	}
+
+	private Map<String, Object> searchTrace(String traceId, List<String> queries, int depth, int limit, int offset) throws IOException {
+		try {
+			javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+			factory.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+			factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+			factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+			factory.setXIncludeAware(false);
+			factory.setExpandEntityReferences(false);
+			org.w3c.dom.Document document = factory.newDocumentBuilder().parse(tracePath(traceId).toFile());
+			javax.xml.xpath.XPath xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+			List<Map<String, Object>> matches = new ArrayList<Map<String, Object>>();
+			boolean truncated = false;
+			for (String query : queries) {
+				javax.xml.xpath.XPathExpression expression = xpath.compile(query);
+				org.w3c.dom.NodeList nodes = (org.w3c.dom.NodeList) expression.evaluate(document, javax.xml.xpath.XPathConstants.NODESET);
+				Map<String, Object> match = new LinkedHashMap<String, Object>();
+				match.put("query", query);
+				match.put("depth", depth);
+				match.put("limit", limit);
+				match.put("offset", offset);
+				match.put("total", Integer.valueOf(nodes.getLength()));
+				List<String> results = new ArrayList<String>();
+				for (int i = offset; i < nodes.getLength() && results.size() < limit; i++) {
+					org.w3c.dom.Node prepared = prepareSearchResultNode(nodes.item(i), depth);
+					results.add(nodeToString(prepared));
+				}
+				match.put("results", results);
+				matches.add(match);
+			}
+			String serialized = marshal(matches) == null ? "" : new String(marshal(matches), StandardCharsets.UTF_8);
+			while (serialized.length() > 51200 && truncateMatches(matches)) {
+				truncated = true;
+				serialized = new String(marshal(matches), StandardCharsets.UTF_8);
+			}
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("traceId", traceId);
+			structuredContent.put("count", matches.size());
+			structuredContent.put("truncated", Boolean.valueOf(truncated));
+			structuredContent.put("matches", matches);
+			return structuredContent;
+		}
+		catch (Exception e) {
+			throw new IOException(e);
+		}
+	}
+
+	private org.w3c.dom.Node prepareSearchResultNode(org.w3c.dom.Node node, int depth) throws Exception {
+		org.w3c.dom.Document copy = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+		org.w3c.dom.Node imported = copy.importNode(node, true);
+		copy.appendChild(imported);
+		trimSearchResult(imported, depth, false);
+		return imported;
+	}
+
+	private boolean trimSearchResult(org.w3c.dom.Node node, int depth, boolean insideInvoke) {
+		if (!(node instanceof org.w3c.dom.Element)) {
+			return false;
+		}
+		org.w3c.dom.Element element = (org.w3c.dom.Element) node;
+		String name = element.getTagName();
+		boolean isInvoke = "invoke".equals(name);
+		boolean currentInsideInvoke = insideInvoke || isInvoke;
+		if (("input".equals(name) || "output".equals(name)) && currentInsideInvoke) {
+			element.setTextContent("");
+			element.setAttribute("truncated", "true");
+			return false;
+		}
+		org.w3c.dom.NodeList children = element.getChildNodes();
+		List<org.w3c.dom.Node> toRemove = new ArrayList<org.w3c.dom.Node>();
+		boolean hasInvokePath = isInvoke;
+		for (int i = 0; i < children.getLength(); i++) {
+			org.w3c.dom.Node child = children.item(i);
+			if (child instanceof org.w3c.dom.Element) {
+				org.w3c.dom.Element childElement = (org.w3c.dom.Element) child;
+				boolean childInvoke = "invoke".equals(childElement.getTagName());
+				if (childInvoke && depth <= 0) {
+					stripElement(childElement);
+					childElement.setAttribute("truncated", "true");
+					hasInvokePath = true;
+				}
+				else {
+					boolean childHasInvokePath = trimSearchResult(child, childInvoke ? depth - 1 : depth, currentInsideInvoke);
+					if (!childHasInvokePath && !childInvoke) {
+						toRemove.add(child);
+					}
+					else {
+						hasInvokePath = true;
+					}
+				}
+			}
+		}
+		for (org.w3c.dom.Node child : toRemove) {
+			element.removeChild(child);
+		}
+		if (!toRemove.isEmpty()) {
+			element.setAttribute("truncated", "true");
+		}
+		return hasInvokePath || !currentInsideInvoke;
+	}
+
+	private boolean truncateMatches(List<Map<String, Object>> matches) throws IOException {
+		for (Map<String, Object> match : matches) {
+			@SuppressWarnings("unchecked")
+			List<String> results = (List<String>) match.get("results");
+			if (results == null) {
+				continue;
+			}
+			for (int i = 0; i < results.size(); i++) {
+				String truncated = truncateSerializedXml(results.get(i));
+				if (!truncated.equals(results.get(i))) {
+					results.set(i, truncated);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private String truncateSerializedXml(String xml) throws IOException {
+		try {
+			javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+			factory.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+			factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+			factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+			factory.setXIncludeAware(false);
+			factory.setExpandEntityReferences(false);
+			org.w3c.dom.Document document = factory.newDocumentBuilder().parse(new org.xml.sax.InputSource(new java.io.StringReader(xml)));
+			if (truncateElement(document.getDocumentElement())) {
+				return nodeToString(document.getDocumentElement());
+			}
+			return xml;
+		}
+		catch (Exception e) {
+			throw new IOException(e);
+		}
+	}
+
+	private boolean truncateElement(org.w3c.dom.Element element) {
+		org.w3c.dom.NodeList children = element.getChildNodes();
+		for (int i = children.getLength() - 1; i >= 0; i--) {
+			org.w3c.dom.Node child = children.item(i);
+			if (!(child instanceof org.w3c.dom.Element)) {
+				continue;
+			}
+			org.w3c.dom.Element childElement = (org.w3c.dom.Element) child;
+			if ("invoke".equals(childElement.getTagName())) {
+				if (truncateElement(childElement)) {
+					element.setAttribute("truncated", "true");
+					return true;
+				}
+				continue;
+			}
+			stripElement(childElement);
+			childElement.setAttribute("truncated", "true");
+			element.setAttribute("truncated", "true");
+			return true;
+		}
+		if ("input".equals(element.getTagName()) || "output".equals(element.getTagName())) {
+			element.setTextContent("");
+			element.setAttribute("truncated", "true");
+			return true;
+		}
+		return false;
+	}
+
+	private void stripElement(org.w3c.dom.Element element) {
+		while (element.hasChildNodes()) {
+			element.removeChild(element.getFirstChild());
+		}
+	}
+
+	private String nodeToString(org.w3c.dom.Node node) throws Exception {
+		javax.xml.transform.TransformerFactory factory = javax.xml.transform.TransformerFactory.newInstance();
+		try {
+			factory.setAttribute("indent-number", Integer.valueOf(1));
+		}
+		catch (IllegalArgumentException e) {
+			// best effort
+		}
+		javax.xml.transform.Transformer transformer = factory.newTransformer();
+		transformer.setOutputProperty(javax.xml.transform.OutputKeys.OMIT_XML_DECLARATION, "yes");
+		transformer.setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "yes");
+		transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "1");
+		java.io.StringWriter writer = new java.io.StringWriter();
+		transformer.transform(new javax.xml.transform.dom.DOMSource(node), new javax.xml.transform.stream.StreamResult(writer));
+		return writer.toString().replace("    ", "\t").trim();
+	}
+
+	private java.nio.file.Path traceRoot() throws IOException {
+		java.nio.file.Path path = MCPUtils.getTracesPath();
+		Files.createDirectories(path);
+		return path;
+	}
+
+	private java.nio.file.Path tracePath(String traceId) throws IOException {
+		java.nio.file.Path root = traceRoot();
+		try (java.util.stream.Stream<java.nio.file.Path> stream = Files.list(root)) {
+			java.nio.file.Path match = stream.filter(single -> single.getFileName().toString().endsWith("-" + traceId + ".xml")).findFirst().orElse(null);
+			if (match == null) {
+				throw protocolError("UNKNOWN_TRACE_ID", "No trace file found for trace id: " + traceId);
+			}
+			return match;
+		}
+	}
+
 	private List<Map<String, String>> extractEdits(Map<String, Object> arguments) {
 		if (arguments == null || !arguments.containsKey("edits")) {
 			throw protocolError("MISSING_EDITS", "edits is required");
@@ -1560,6 +2063,41 @@ public class MCPREST {
 			throw protocolError(code, key + " is required");
 		}
 		return value;
+	}
+
+	private static String stacktrace(Throwable throwable) {
+		StringWriter writer = new StringWriter();
+		PrintWriter printer = new PrintWriter(writer);
+		throwable.printStackTrace(printer);
+		printer.flush();
+		return writer.toString();
+	}
+
+	private String buildExceptionMessageChain(Throwable throwable) {
+		if (throwable == null) {
+			return "No exception details available.";
+		}
+		StringBuilder builder = new StringBuilder();
+		Throwable current = throwable;
+		boolean first = true;
+		while (current != null) {
+			if (!first) {
+				builder.append("\nCaused by: ");
+			}
+			builder.append(exceptionMessage(current));
+			Throwable cause = current.getCause();
+			if (cause == current) {
+				break;
+			}
+			current = cause;
+			first = false;
+		}
+		return builder.toString();
+	}
+
+	private String exceptionMessage(Throwable throwable) {
+		String message = throwable.getMessage();
+		return throwable.getClass().getName() + (message == null || message.trim().isEmpty() ? "" : ": " + message.trim());
 	}
 
 	private ArtifactFragment findEditableFragment(ArtifactFragmentManager<Artifact> manager, Artifact artifact, String artifactId, String path) {
@@ -1788,5 +2326,347 @@ public class MCPREST {
 			headers.add(new MimeHeader(MCP_SESSION_ID, sessionId));
 		}
 		return new PlainMimeContentPart(null, IOUtils.wrap(content, true), headers.toArray(new Header[headers.size()]));
+	}
+
+	private static class TraceRun implements Closeable {
+		private final String traceId;
+		private final java.nio.file.Path path;
+		private final MCPInvokeTraceTracker tracker;
+
+		private TraceRun(String traceId, java.nio.file.Path path, MCPInvokeTraceTracker tracker) {
+			this.traceId = traceId;
+			this.path = path;
+			this.tracker = tracker;
+		}
+
+		private static TraceRun start(be.nabu.eai.repository.api.Repository repository, DefinedService service) throws IOException {
+			String traceId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+			java.nio.file.Path traceRoot = MCPUtils.getTracesPath();
+			Files.createDirectories(traceRoot);
+			java.nio.file.Path path = traceRoot.resolve(service.getId() + "-" + traceId + ".xml");
+			BufferedWriter writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8);
+			return new TraceRun(traceId, path, new MCPInvokeTraceTracker(repository, service.getId(), traceId, writer, path));
+		}
+
+		@Override
+		public void close() throws IOException {
+			tracker.close();
+		}
+	}
+
+	private static class MCPInvokeTraceTracker implements ServiceRuntimeTracker, Closeable {
+		private final be.nabu.eai.repository.api.Repository repository;
+		private final String rootServiceId;
+		private final String traceId;
+		private final BufferedWriter writer;
+		private final java.nio.file.Path path;
+		private final Deque<String> elementStack = new ArrayDeque<String>();
+		private final Deque<Object> hookStack = new ArrayDeque<Object>();
+		private final Deque<Boolean> errorStack = new ArrayDeque<Boolean>();
+		private boolean closed;
+
+		private MCPInvokeTraceTracker(be.nabu.eai.repository.api.Repository repository, String rootServiceId, String traceId, BufferedWriter writer, java.nio.file.Path path) {
+			this.repository = repository;
+			this.rootServiceId = rootServiceId;
+			this.traceId = traceId;
+			this.writer = writer;
+			this.path = path;
+		}
+
+		@Override
+		public void describe(Object object) {
+			// descriptions are written as static step attributes when available
+		}
+
+		@Override
+		public void report(Object object) {
+			// ignore for now
+		}
+
+		@Override
+		public void start(Service service) {
+			DefinedService defined = service instanceof DefinedService ? (DefinedService) service : null;
+			String serviceId = defined == null ? rootServiceId : defined.getId();
+			try {
+				writeIndent();
+				writer.write("<invoke service=\"" + escape(serviceId) + "\" traceId=\"" + traceId + "\" started=\"" + TRACE_TIME_FORMATTER.format(Instant.now()) + "\">\n");
+				elementStack.push("invoke");
+				errorStack.push(false);
+				hookStack.push(service);
+				writeSerialized("input", ServiceRuntime.getRuntime() == null ? null : ServiceRuntime.getRuntime().getInput());
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(defined == null ? null : defined.getClass());
+				if (provider != null) {
+					provider.start(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), service);
+				}
+				writer.flush();
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void stop(Service service) {
+			try {
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(service == null ? null : service.getClass());
+				if (provider != null) {
+					provider.stop(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), service);
+				}
+				writeSerialized("output", ServiceRuntime.getRuntime() == null ? null : ServiceRuntime.getRuntime().getOutput());
+				writeClose("invoke");
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void error(Service service, Exception exception) {
+			try {
+				writeError(exception);
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(service == null ? null : service.getClass());
+				if (provider != null) {
+					provider.error(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), service, exception);
+				}
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void before(Object step) {
+			try {
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(step == null ? null : step.getClass());
+				if (provider != null) {
+					provider.before(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), step);
+				}
+				hookStack.push(step);
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void after(Object step) {
+			try {
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(step == null ? null : step.getClass());
+				if (provider != null) {
+					provider.after(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), step);
+				}
+				if (!hookStack.isEmpty()) {
+					hookStack.pop();
+				}
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void error(Object step, Exception exception) {
+			try {
+				writeError(exception);
+				be.nabu.eai.repository.api.MCPTraceProvider provider = resolveProvider(step == null ? null : step.getClass());
+				if (provider != null) {
+					provider.error(new ProviderTraceContext(writer, traceId, rootServiceId, elementStack.size()), step, exception);
+				}
+			}
+			catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		private be.nabu.eai.repository.api.MCPTraceProvider resolveProvider(Class<?> type) {
+			if (type == null) {
+				return null;
+			}
+			if (TRACE_PROVIDER_CACHE.containsKey(type)) {
+				return TRACE_PROVIDER_CACHE.get(type);
+			}
+			be.nabu.eai.repository.api.MCPTraceProvider closest = null;
+			Class<?> closestType = null;
+			for (be.nabu.eai.repository.api.MCPTraceProvider provider : repository.getArtifacts(be.nabu.eai.repository.api.MCPTraceProvider.class)) {
+				try {
+					java.lang.reflect.Method method = provider.getClass().getMethod("getArtifactClass");
+					Class<?> artifactClass = (Class<?>) method.invoke(provider);
+					if (artifactClass != null && artifactClass.isAssignableFrom(type)) {
+						if (closest == null || closestType.isAssignableFrom(artifactClass)) {
+							closest = provider;
+							closestType = artifactClass;
+						}
+					}
+				}
+				catch (Exception e) {
+					// ignore invalid providers
+				}
+			}
+			if (closest != null) {
+				TRACE_PROVIDER_CACHE.putIfAbsent(type, closest);
+			}
+			return closest;
+		}
+
+		private void writeSerialized(String tag, ComplexContent content) throws IOException {
+			if (content == null) {
+				return;
+			}
+			writeIndent();
+			writer.write("\t<" + tag + ">\n");
+			String serialized = serialize(content);
+			if (serialized != null && !serialized.trim().isEmpty()) {
+				for (String line : serialized.trim().split("\\r?\\n")) {
+					if (line.trim().isEmpty()) {
+						continue;
+					}
+					writeIndent();
+					writer.write("\t\t" + line + "\n");
+				}
+			}
+			writeIndent();
+			writer.write("\t</" + tag + ">\n");
+		}
+
+		private String serialize(ComplexContent content) {
+			try {
+				XMLBinding binding = new XMLBinding(content.getType(), Charset.forName("UTF-8"));
+				binding.setPrettyPrint(true);
+				// Disable xsi output to reduce token size from repeated namespace declarations.
+				binding.setAllowXSI(false);
+				binding.setNamespaceAware(false);
+				ByteArrayOutputStream output = new ByteArrayOutputStream();
+				binding.marshal(output, content);
+				return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+			}
+			catch (Exception e) {
+				return "<error>" + escape(stacktrace(e)) + "</error>";
+			}
+		}
+
+		private void writeError(Exception exception) throws IOException {
+			boolean handled = false;
+			String content = stacktrace(exception);
+			if (exception instanceof ServiceException) {
+				ServiceException serviceException = (ServiceException) exception;
+				handled = serviceException.isReported();
+				if (handled) {
+					content = "see original error";
+				}
+				else {
+					serviceException.setReported(true);
+				}
+			}
+			if (!errorStack.isEmpty() && errorStack.peek()) {
+				return;
+			}
+			writeIndent();
+			writer.write("\t<error handled=\"" + handled + "\">" + escape(content) + "</error>\n");
+			writer.flush();
+			if (!errorStack.isEmpty()) {
+				errorStack.pop();
+				errorStack.push(true);
+			}
+		}
+
+		private void writeClose(String tag) throws IOException {
+			if (!elementStack.isEmpty()) {
+				elementStack.pop();
+			}
+			if (!errorStack.isEmpty()) {
+				errorStack.pop();
+			}
+			writeIndent();
+			writer.write("</" + tag + ">\n");
+			writer.flush();
+		}
+
+		private void writeIndent() throws IOException {
+			for (int i = 0; i < elementStack.size(); i++) {
+				writer.write("\t");
+			}
+		}
+
+		@Override
+		public void close() throws IOException {
+			if (!closed) {
+				closed = true;
+				while (!elementStack.isEmpty()) {
+					writeClose(elementStack.peek());
+				}
+				writer.close();
+			}
+		}
+	}
+
+	private static class ProviderTraceContext implements be.nabu.eai.repository.api.MCPTraceContext {
+		private final Writer writer;
+		private final String traceId;
+		private final String rootServiceId;
+		private final int depth;
+		private final Map<String, Object> attributes = new LinkedHashMap<String, Object>();
+
+		private ProviderTraceContext(Writer writer, String traceId, String rootServiceId, int depth) {
+			this.writer = writer;
+			this.traceId = traceId;
+			this.rootServiceId = rootServiceId;
+			this.depth = depth;
+		}
+
+		@Override
+		public String getTraceId() {
+			return traceId;
+		}
+
+		@Override
+		public String getRootServiceId() {
+			return rootServiceId;
+		}
+
+		@Override
+		public Writer getWriter() {
+			return writer;
+		}
+
+		@Override
+		public Map<String, Object> getAttributes() {
+			return attributes;
+		}
+
+		@Override
+		public boolean isIncludeLinks() {
+			return Boolean.parseBoolean(System.getProperty(TRACE_INCLUDE_LINKS, "false"));
+		}
+
+		@Override
+		public int getDepth() {
+			return depth;
+		}
+
+		@Override
+		public void write(String value) throws IOException {
+			writer.write(value);
+		}
+
+		@Override
+		public void writeLine(String value) throws IOException {
+			for (int i = 0; i < depth; i++) {
+				writer.write("\t");
+			}
+			writer.write(value);
+			writer.write("\n");
+		}
+
+		@Override
+		public void flush() throws IOException {
+			writer.flush();
+		}
+	}
+
+	private static String escape(String value) {
+		if (value == null) {
+			return null;
+		}
+		return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
 	}
 }

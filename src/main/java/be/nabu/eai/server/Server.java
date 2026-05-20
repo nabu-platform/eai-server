@@ -80,6 +80,7 @@ import be.nabu.eai.server.api.ServerListener;
 import be.nabu.eai.server.api.ServerListener.Phase;
 import be.nabu.eai.server.fragments.FileSystemFragmentIndexBackend;
 import be.nabu.eai.server.fragments.FragmentIndexService;
+import be.nabu.eai.server.fragments.MCPUtils;
 import be.nabu.eai.server.fragments.JdbcFragmentIndexBackend;
 import be.nabu.eai.server.rest.ServerREST;
 import be.nabu.libs.artifacts.api.Artifact;
@@ -775,6 +776,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 							logger.info("Server started in " + ((new Date().getTime() - startupTime.getTime()) / 1000) + "s");
 							isStarted = true;
 							initializeListeners();
+							logMCPReady();
 							// it may have built up a number of startup exceptions, interesting to send those along
 							if (processor != null) {
 								if (startupEvent != null) {
@@ -1730,6 +1732,12 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		shutdownActions.add(runnable);
 	}
 	
+	private void logMCPReady() {
+		if (enableMCP && fragmentIndexService != null) {
+			logger.info("------------------------------------- MCP READY (/mcp) -------------------------------------");
+		}
+	}
+	
 	private void initializeFragmentIndexService() {
 		if (!enableMCP) {
 			logger.info("MCP disabled, fragment indexing is disabled");
@@ -1754,16 +1762,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			logger.info("Using database fragment index backend: " + dataSourceId);
 		}
 		else {
-			String folder = System.getProperty(FileSystemFragmentIndexBackend.MCP_PATH);
-			if (folder == null || folder.trim().isEmpty()) {
-				String property = System.getProperty("user.home");
-				File target = property == null ? new File(".") : new File(property);
-				folder = new File(new File(target, ".nabu"), "fragments").getAbsolutePath();
-			}
-			else {
-				folder = new File(folder, "fragments").getAbsolutePath();
-			}
-			fragmentIndexService = new FragmentIndexService(repository, new FileSystemFragmentIndexBackend(new File(folder).toPath()));
+			String folder = MCPUtils.getFragmentsPath().toString();
+			fragmentIndexService = new FragmentIndexService(repository, new FileSystemFragmentIndexBackend(MCPUtils.getFragmentsPath()));
 			logger.info("Using filesystem fragment index backend: " + folder);
 		}
 		fragmentIndexService.initialize();
