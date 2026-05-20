@@ -84,7 +84,7 @@ public class FragmentIndexService {
 				return;
 			}
 			List<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment> fragments = new ArrayList<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment>(manager.listFragments(artifact));
-			backend.index(artifactId, node.getVersion(), fragments);
+			backend.index(artifactId, manager.getArtifactType(artifact), node.getVersion(), fragments);
 		}
 		catch (Exception e) {
 			logger.error("Could not index fragments for artifact: " + artifactId, e);

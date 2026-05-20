@@ -40,7 +40,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		try {
 			connection = dataSource.getConnection();
 			statement = connection.createStatement();
-			statement.execute("create table if not exists fragment_index (artifact_id varchar(255) not null, version bigint not null, path varchar(255) not null, artifact_type varchar(255), content_type varchar(255), content clob, properties clob, content_hash varchar(64), editable boolean not null, removable boolean not null, primary key (artifact_id, path))");
+			statement.execute("create table if not exists fragment_index (artifact_id varchar(255) not null, version bigint not null, path varchar(255) not null, artifact_type varchar(255), fragment_type varchar(255), content_type varchar(255), content clob, properties clob, content_hash varchar(64), editable boolean not null, removable boolean not null, primary key (artifact_id, path))");
 		}
 		catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -56,7 +56,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		try {
 			rebuildConnection = dataSource.getConnection();
 			rebuildConnection.setAutoCommit(false);
-			rebuildUpsert = rebuildConnection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
+			rebuildUpsert = rebuildConnection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, fragment_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, fragment_type = source.fragment_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, fragment_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.fragment_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
 		}
 		catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -64,10 +64,10 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public void index(String artifactId, long version, List<ArtifactFragment> fragments) {
+	public void index(String artifactId, String artifactType, long version, List<ArtifactFragment> fragments) {
 		if (rebuildConnection != null) {
 			try {
-				indexBatch(rebuildConnection, rebuildUpsert, artifactId, version, fragments, true);
+				indexBatch(rebuildConnection, rebuildUpsert, artifactId, artifactType, version, fragments, true);
 			}
 			catch (SQLException e) {
 				rollback(rebuildConnection);
@@ -82,8 +82,8 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 			connection = dataSource.getConnection();
 			connection.setAutoCommit(false);
 			deleteMissing(connection, artifactId, fragments);
-			upsert = connection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
-			indexBatch(connection, upsert, artifactId, version, fragments, false);
+			upsert = connection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, fragment_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, fragment_type = source.fragment_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, fragment_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.fragment_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
+			indexBatch(connection, upsert, artifactId, artifactType, version, fragments, false);
 			connection.commit();
 		}
 		catch (SQLException e) {
@@ -153,7 +153,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		ResultSet resultSet = null;
 		try {
 			connection = dataSource.getConnection();
-			StringBuilder sql = new StringBuilder("select artifact_id, path, version, artifact_type, content_type, content, properties, editable, removable from fragment_index");
+			StringBuilder sql = new StringBuilder("select artifact_id, path, version, artifact_type, fragment_type, content_type, content, properties, editable, removable from fragment_index");
 			List<String> filteredGlobs = filterValues(globs);
 			List<String> filteredNamespaces = filterValues(namespaces);
 			boolean hasWhere = false;
@@ -194,7 +194,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 				String content = resultSet.getString("content");
 				List<String> matches = RipgrepFormatter.format(content, compiled, before, after);
 				if (!matches.isEmpty()) {
-					results.add(new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), content, resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), matches, resultSet.getBoolean("editable"), resultSet.getBoolean("removable")));
+					results.add(new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), resultSet.getString("fragment_type"), content, resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), matches, resultSet.getBoolean("editable"), resultSet.getBoolean("removable")));
 					if (limit > 0 && results.size() >= limit) {
 						break;
 					}
@@ -212,20 +212,21 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		}
 	}
 
-	private void indexBatch(Connection connection, PreparedStatement upsert, String artifactId, long version, List<ArtifactFragment> fragments, boolean batchCommit) throws SQLException {
+	private void indexBatch(Connection connection, PreparedStatement upsert, String artifactId, String artifactType, long version, List<ArtifactFragment> fragments, boolean batchCommit) throws SQLException {
 		int pending = 0;
 		for (ArtifactFragment fragment : fragments) {
 			String hash = hash(fragment.getContent());
 			upsert.setString(1, artifactId);
 			upsert.setLong(2, version);
 			upsert.setString(3, fragment.getPath());
-			upsert.setString(4, fragment.getArtifactType());
-			upsert.setString(5, fragment.getContentType());
-			upsert.setString(6, fragment.getContent());
-			upsert.setString(7, serializeProperties(fragment.getProperties()));
-			upsert.setString(8, hash);
-			upsert.setBoolean(9, fragment.isEditable());
-			upsert.setBoolean(10, fragment.isRemovable());
+			upsert.setString(4, artifactType);
+			upsert.setString(5, fragment.getFragmentType());
+			upsert.setString(6, fragment.getContentType());
+			upsert.setString(7, fragment.getContent());
+			upsert.setString(8, serializeProperties(fragment.getProperties()));
+			upsert.setString(9, hash);
+			upsert.setBoolean(10, fragment.isEditable());
+			upsert.setBoolean(11, fragment.isRemovable());
 			upsert.addBatch();
 			pending++;
 			if (pending >= BATCH_SIZE) {

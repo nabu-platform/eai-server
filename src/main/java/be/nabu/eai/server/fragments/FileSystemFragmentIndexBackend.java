@@ -20,7 +20,7 @@ import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
 
 public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 
-	public static final String FRAGMENT_INDEX_DIRECTORY = "be.nabu.eai.server.fragments.directory";
+	public static final String MCP_PATH = "mcp.path";
 	private Logger logger = LoggerFactory.getLogger(getClass());
 	private Path root;
 
@@ -45,13 +45,13 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public void index(String artifactId, long version, List<ArtifactFragment> fragments) {
+	public void index(String artifactId, String artifactType, long version, List<ArtifactFragment> fragments) {
 		Path artifactRoot = artifactRoot(artifactId);
 		try {
 			Files.createDirectories(artifactRoot);
 			deleteMissing(artifactRoot, fragments);
 			for (ArtifactFragment fragment : fragments) {
-				writeFragment(artifactRoot, fragment);
+				writeFragment(artifactRoot, artifactType, fragment);
 			}
 		}
 		catch (IOException e) {
@@ -168,6 +168,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
 			properties.remove("hash");
 			properties.remove("artifactType");
+			properties.remove("fragmentType");
 			properties.remove("contentType");
 			properties.remove("editable");
 			properties.remove("removable");
@@ -175,7 +176,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			if (!matchesNamespace(namespaces, artifactId)) {
 				continue;
 			}
-			results.add(new FragmentSearch(artifactId, relativizeFragment(artifactRoot, file), fragment.get("artifactType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, entry.getValue(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
+			results.add(new FragmentSearch(artifactId, relativizeFragment(artifactRoot, file), fragment.get("artifactType"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, entry.getValue(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
 		}
 		return results;
 	}
@@ -261,7 +262,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			});
 	}
 
-	private void writeFragment(Path artifactRoot, ArtifactFragment fragment) throws IOException {
+	private void writeFragment(Path artifactRoot, String artifactType, ArtifactFragment fragment) throws IOException {
 		Path file = artifactRoot.resolve(fragment.getPath());
 		Files.createDirectories(file.getParent());
 		String content = fragment.getContent() == null ? "" : fragment.getContent();
@@ -272,7 +273,8 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		Files.write(file, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 		Map<String, String> values = new LinkedHashMap<String, String>();
 		values.put("hash", hash);
-		values.put("artifactType", fragment.getArtifactType());
+		values.put("artifactType", artifactType);
+		values.put("fragmentType", fragment.getFragmentType());
 		values.put("contentType", fragment.getContentType());
 		values.put("editable", Boolean.toString(fragment.isEditable()));
 		values.put("removable", Boolean.toString(fragment.isRemovable()));

@@ -280,6 +280,10 @@ public class CollaborationListener {
 			}
 		}
 	}
+
+	public void notifyArtifactReload(String artifactId, String message) {
+		broadcast(WebSocketUtils.newMessage(marshal(new CollaborationMessage(CollaborationMessageType.UPDATE, message, artifactId))), null);
+	}
 	
 	public WebSocketMessage newUserList() {
 		List<User> users = getUsers();

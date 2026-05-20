@@ -1754,11 +1754,14 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			logger.info("Using database fragment index backend: " + dataSourceId);
 		}
 		else {
-			String folder = System.getProperty(FileSystemFragmentIndexBackend.FRAGMENT_INDEX_DIRECTORY);
+			String folder = System.getProperty(FileSystemFragmentIndexBackend.MCP_PATH);
 			if (folder == null || folder.trim().isEmpty()) {
 				String property = System.getProperty("user.home");
 				File target = property == null ? new File(".") : new File(property);
 				folder = new File(new File(target, ".nabu"), "fragments").getAbsolutePath();
+			}
+			else {
+				folder = new File(folder, "fragments").getAbsolutePath();
 			}
 			fragmentIndexService = new FragmentIndexService(repository, new FileSystemFragmentIndexBackend(new File(folder).toPath()));
 			logger.info("Using filesystem fragment index backend: " + folder);

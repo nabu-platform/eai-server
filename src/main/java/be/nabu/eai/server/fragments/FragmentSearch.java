@@ -11,6 +11,7 @@ public class FragmentSearch implements ArtifactFragment {
 	private String artifactId;
 	private String path;
 	private String artifactType;
+	private String fragmentType;
 	private String content;
 	private String contentType;
 	private Map<String, String> properties;
@@ -18,14 +19,15 @@ public class FragmentSearch implements ArtifactFragment {
 	private boolean editable;
 	private boolean removable;
 
-	public FragmentSearch(ArtifactFragment fragment, List<String> matches) {
-		this(fragment.getArtifactId(), fragment.getPath(), fragment.getArtifactType(), fragment.getContent(), fragment.getContentType(), fragment.getProperties(), matches, fragment.isEditable(), fragment.isRemovable());
+	public FragmentSearch(ArtifactFragment fragment, String artifactType, List<String> matches) {
+		this(fragment.getArtifactId(), fragment.getPath(), artifactType, fragment.getFragmentType(), fragment.getContent(), fragment.getContentType(), fragment.getProperties(), matches, fragment.isEditable(), fragment.isRemovable());
 	}
 
-	public FragmentSearch(String artifactId, String path, String artifactType, String content, String contentType, Map<String, String> properties, List<String> matches, boolean editable, boolean removable) {
+	public FragmentSearch(String artifactId, String path, String artifactType, String fragmentType, String content, String contentType, Map<String, String> properties, List<String> matches, boolean editable, boolean removable) {
 		this.artifactId = artifactId;
 		this.path = path;
 		this.artifactType = artifactType;
+		this.fragmentType = fragmentType;
 		this.content = content;
 		this.contentType = contentType;
 		this.properties = properties == null ? Collections.<String, String>emptyMap() : properties;
@@ -64,9 +66,13 @@ public class FragmentSearch implements ArtifactFragment {
 		return artifactId;
 	}
 
-	@Override
 	public String getArtifactType() {
 		return artifactType;
+	}
+
+	@Override
+	public String getFragmentType() {
+		return fragmentType;
 	}
 
 	@Override
