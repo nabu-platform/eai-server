@@ -10,6 +10,7 @@ public class FragmentSearchResult implements ArtifactFragment {
 
 	private String artifactId;
 	private String artifactType;
+	private String artifactCategory;
 	private String fragmentType;
 	private String path;
 	private String content;
@@ -17,9 +18,10 @@ public class FragmentSearchResult implements ArtifactFragment {
 	private Map<String, String> properties;
 	private List<String> matches;
 
-	public FragmentSearchResult(ArtifactFragment fragment, String artifactType, List<String> matches) {
+	public FragmentSearchResult(ArtifactFragment fragment, String artifactType, String artifactCategory, List<String> matches) {
 		this.artifactId = fragment.getArtifactId();
 		this.artifactType = artifactType;
+		this.artifactCategory = artifactCategory;
 		this.fragmentType = fragment.getFragmentType();
 		this.path = fragment.getPath();
 		this.content = fragment.getContent();
@@ -60,6 +62,10 @@ public class FragmentSearchResult implements ArtifactFragment {
 
 	public String getArtifactType() {
 		return artifactType;
+	}
+
+	public String getArtifactCategory() {
+		return artifactCategory;
 	}
 
 	@Override

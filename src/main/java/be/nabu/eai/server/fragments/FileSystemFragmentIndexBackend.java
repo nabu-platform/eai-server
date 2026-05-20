@@ -45,13 +45,13 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public void index(String artifactId, String artifactType, long version, List<ArtifactFragment> fragments) {
+	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments) {
 		Path artifactRoot = artifactRoot(artifactId);
 		try {
 			Files.createDirectories(artifactRoot);
 			deleteMissing(artifactRoot, fragments);
 			for (ArtifactFragment fragment : fragments) {
-				writeFragment(artifactRoot, artifactType, fragment);
+				writeFragment(artifactRoot, artifactType, artifactCategory, fragment);
 			}
 		}
 		catch (IOException e) {
@@ -76,7 +76,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, int before, int after, int limit) {
+	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, int before, int after, int limit) {
 		ensureRipgrep();
 		List<String> command = new ArrayList<String>();
 		command.add("rg");
@@ -114,7 +114,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			if (exitCode != 0 && exitCode != 1) {
 				throw new RuntimeException("rg failed with exit code " + exitCode + ": " + lines);
 			}
-			return parse(lines, filteredNamespaces);
+			return parse(lines, filteredNamespaces, filterValues(artifactTypes), filterValues(artifactCategories));
 		}
 		catch (Exception e) {
 			throw new RuntimeException(e);
@@ -137,7 +137,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		return temp;
 	}
 
-	private List<FragmentSearch> parse(List<String> lines, List<String> namespaces) throws IOException {
+	private List<FragmentSearch> parse(List<String> lines, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) throws IOException {
 		Map<String, List<String>> grouped = new LinkedHashMap<String, List<String>>();
 		String currentFile = null;
 		for (String line : lines) {
@@ -168,6 +168,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
 			properties.remove("hash");
 			properties.remove("artifactType");
+			properties.remove("artifactCategory");
 			properties.remove("fragmentType");
 			properties.remove("contentType");
 			properties.remove("editable");
@@ -176,7 +177,13 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			if (!matchesNamespace(namespaces, artifactId)) {
 				continue;
 			}
-			results.add(new FragmentSearch(artifactId, relativizeFragment(artifactRoot, file), fragment.get("artifactType"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, entry.getValue(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
+			if (!artifactTypes.isEmpty() && !artifactTypes.contains(fragment.get("artifactType"))) {
+				continue;
+			}
+			if (!artifactCategories.isEmpty() && !artifactCategories.contains(fragment.get("artifactCategory"))) {
+				continue;
+			}
+			results.add(new FragmentSearch(artifactId, relativizeFragment(artifactRoot, file), fragment.get("artifactType"), fragment.get("artifactCategory"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, entry.getValue(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
 		}
 		return results;
 	}
@@ -262,7 +269,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			});
 	}
 
-	private void writeFragment(Path artifactRoot, String artifactType, ArtifactFragment fragment) throws IOException {
+	private void writeFragment(Path artifactRoot, String artifactType, String artifactCategory, ArtifactFragment fragment) throws IOException {
 		Path file = artifactRoot.resolve(fragment.getPath());
 		Files.createDirectories(file.getParent());
 		String content = fragment.getContent() == null ? "" : fragment.getContent();
@@ -274,6 +281,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		Map<String, String> values = new LinkedHashMap<String, String>();
 		values.put("hash", hash);
 		values.put("artifactType", artifactType);
+		values.put("artifactCategory", artifactCategory);
 		values.put("fragmentType", fragment.getFragmentType());
 		values.put("contentType", fragment.getContentType());
 		values.put("editable", Boolean.toString(fragment.isEditable()));

@@ -8,8 +8,8 @@ public interface FragmentIndexBackend {
 
 	public void initialize();
 	public void beginRebuild();
-	public void index(String artifactId, String artifactType, long version, List<ArtifactFragment> fragments);
+	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments);
 	public void finalizeRebuild();
 	public void delete(String artifactId);
-	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, int before, int after, int limit);
+	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, int before, int after, int limit);
 }

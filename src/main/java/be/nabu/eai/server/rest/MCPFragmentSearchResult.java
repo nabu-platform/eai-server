@@ -8,6 +8,7 @@ public class MCPFragmentSearchResult {
 	private String artifactId;
 	private String path;
 	private String artifactType;
+	private String artifactCategory;
 	private String fragmentType;
 	private String contentType;
 	private Map<String, String> properties;
@@ -15,10 +16,11 @@ public class MCPFragmentSearchResult {
 	private boolean removable;
 	private List<String> matches;
 
-	public MCPFragmentSearchResult(String artifactId, String path, String artifactType, String fragmentType, String contentType, Map<String, String> properties, boolean editable, boolean removable, List<String> matches) {
+	public MCPFragmentSearchResult(String artifactId, String path, String artifactType, String artifactCategory, String fragmentType, String contentType, Map<String, String> properties, boolean editable, boolean removable, List<String> matches) {
 		this.artifactId = artifactId;
 		this.path = path;
 		this.artifactType = artifactType;
+		this.artifactCategory = artifactCategory;
 		this.fragmentType = fragmentType;
 		this.contentType = contentType;
 		this.properties = properties;
@@ -37,6 +39,10 @@ public class MCPFragmentSearchResult {
 
 	public String getArtifactType() {
 		return artifactType;
+	}
+
+	public String getArtifactCategory() {
+		return artifactCategory;
 	}
 
 	public String getFragmentType() {

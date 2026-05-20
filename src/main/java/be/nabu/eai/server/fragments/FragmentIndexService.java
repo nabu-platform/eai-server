@@ -58,8 +58,8 @@ public class FragmentIndexService {
 		}
 	}
 
-	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, int before, int after, int limit) {
-		return backend.search(pattern, globs, namespaces, before, after, limit);
+	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, int before, int after, int limit) {
+		return backend.search(pattern, globs, namespaces, artifactTypes, artifactCategories, before, after, limit);
 	}
 
 	private void index(Entry entry) {
@@ -84,7 +84,7 @@ public class FragmentIndexService {
 				return;
 			}
 			List<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment> fragments = new ArrayList<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment>(manager.listFragments(artifact));
-			backend.index(artifactId, manager.getArtifactType(artifact), node.getVersion(), fragments);
+			backend.index(artifactId, manager.getArtifactType(), manager.getArtifactCategory(), node.getVersion(), fragments);
 		}
 		catch (Exception e) {
 			logger.error("Could not index fragments for artifact: " + artifactId, e);
