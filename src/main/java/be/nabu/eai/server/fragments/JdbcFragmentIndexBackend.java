@@ -141,10 +141,10 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, int before, int after, int limit) {
+	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
 		Pattern compiled;
 		try {
-			compiled = Pattern.compile(pattern);
+			compiled = Pattern.compile(pattern, caseSensitive ? 0 : Pattern.CASE_INSENSITIVE);
 		}
 		catch (PatternSyntaxException e) {
 			throw new IllegalArgumentException("Invalid regex pattern: " + pattern, e);

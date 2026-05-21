@@ -6,10 +6,12 @@ public class MCPToolCallInput {
 
 	private String pattern;
 	private List<String> glob;
-	private String caseSensitive;
+	private Boolean caseSensitive;
 	private Integer beforeContext;
 	private Integer afterContext;
 	private Integer context;
+	private Integer limit;
+	private Integer offset;
 	private List<String> namespace;
 	private List<String> artifactType;
 	private List<String> artifactCategory;
@@ -30,11 +32,11 @@ public class MCPToolCallInput {
 		this.glob = glob;
 	}
 
-	public String getCaseSensitive() {
+	public Boolean getCaseSensitive() {
 		return caseSensitive;
 	}
 
-	public void setCaseSensitive(String caseSensitive) {
+	public void setCaseSensitive(Boolean caseSensitive) {
 		this.caseSensitive = caseSensitive;
 	}
 
@@ -60,6 +62,22 @@ public class MCPToolCallInput {
 
 	public void setContext(Integer context) {
 		this.context = context;
+	}
+
+	public Integer getLimit() {
+		return limit;
+	}
+
+	public void setLimit(Integer limit) {
+		this.limit = limit;
+	}
+
+	public Integer getOffset() {
+		return offset;
+	}
+
+	public void setOffset(Integer offset) {
+		this.offset = offset;
 	}
 
 	public List<String> getNamespace() {

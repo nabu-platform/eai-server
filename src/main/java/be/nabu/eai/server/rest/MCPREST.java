@@ -32,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import be.nabu.eai.repository.CollectionImpl;
 import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.ArtifactFragmentManager;
@@ -116,6 +117,7 @@ public class MCPREST {
 	private static final String EDIT_TOOL_NAME = "edit_nabu_artifact_fragment";
 	private static final String WRITE_TOOL_NAME = "write_nabu_artifact_fragment";
 	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
+	private static final String CREATE_PROJECT_TOOL_NAME = "create_nabu_project";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
 	private static final String INVOKE_TOOL_NAME = "invoke_nabu_service";
 	private static final String TRACE_SEARCH_TOOL_NAME = "search_nabu_service_trace";
@@ -193,7 +195,7 @@ public class MCPREST {
 			Map<String, Object> searchTool = new LinkedHashMap<String, Object>();
 			searchTool.put("name", SEARCH_TOOL_NAME);
 			searchTool.put("title", "Search nabu artifacts");
-			searchTool.put("description", "Search indexed artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
+			searchTool.put("description", "Search artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
 			Map<String, Object> searchAnnotations = new LinkedHashMap<String, Object>();
 			searchAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			searchAnnotations.put("intentTemplate", "Search for {pattern} [in namespaces {namespace}] [with glob {glob}] [context {context}] [before {beforeContext}] [after {afterContext}]");
@@ -222,10 +224,12 @@ public class MCPREST {
 			searchArtifactCategories.put("items", searchArtifactCategoryItem);
 			searchArtifactCategories.put("description", "Optional artifact category filters. Do not pass this when 'artifactId' is provided.");
 			searchProperties.put("artifactCategory", searchArtifactCategories);
-			searchProperties.put("caseSensitive", schema("string"));
+			searchProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
 			searchProperties.put("beforeContext", schema("integer"));
 			searchProperties.put("afterContext", schema("integer"));
 			searchProperties.put("context", schema("integer"));
+			searchProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0). When omitted, all matches are considered."));
+			searchProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results. Default: 0."));
 			searchInputSchema.put("properties", searchProperties);
 			searchInputSchema.put("required", Arrays.asList("pattern"));
 			searchTool.put("inputSchema", searchInputSchema);
@@ -237,7 +241,7 @@ public class MCPREST {
 			findTool.put("description", "Find indexed nabu artifact fragments using path and artifact filters. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
 			Map<String, Object> findAnnotations = new LinkedHashMap<String, Object>();
 			findAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
-			findAnnotations.put("intentTemplate", "Find artifact fragments [matching {pattern}] [in artifact {artifactId}] [at path {path}] [limit {limit}]");
+			findAnnotations.put("intentTemplate", "Find artifact fragments [matching {pattern}] [in artifact {artifactId}] [limit {limit}]");
 			findTool.put("annotations", findAnnotations);
 			Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
 			findInputSchema.put("type", "object");
@@ -257,11 +261,10 @@ public class MCPREST {
 			findArtifactCategoryItem.put("enum", listAvailableArtifactCategories());
 			findArtifactCategory.put("items", findArtifactCategoryItem);
 			findProperties.put("artifactCategory", findArtifactCategory);
-			findProperties.put("path", propertySchema("string", "Optional exact fragment path filter."));
 			findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a glob instead of a regex."));
 			findProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0)."));
 			findProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results."));
-			findProperties.put("caseSensitive", propertySchema("string", "Case sensitivity: auto|true|false."));
+			findProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
 			findInputSchema.put("properties", findProperties);
 			findTool.put("inputSchema", findInputSchema);
 			findTool.put("outputSchema", findOutputSchema());
@@ -350,6 +353,25 @@ public class MCPREST {
 				tools.add(createTool);
 				createTool.put("inputSchema", createInputSchema);
 			}
+			Map<String, Object> createProjectTool = new LinkedHashMap<String, Object>();
+			createProjectTool.put("name", CREATE_PROJECT_TOOL_NAME);
+			createProjectTool.put("title", "Create nabu project");
+			createProjectTool.put("description", "Create a new nabu project at the repository root.");
+			Map<String, Object> createProjectAnnotations = new LinkedHashMap<String, Object>();
+			createProjectAnnotations.put("scopes", Arrays.asList("write:nabu:project"));
+			createProjectAnnotations.put("intentTemplate", "Creating project {name} [{type}]");
+			createProjectTool.put("annotations", createProjectAnnotations);
+			Map<String, Object> createProjectInputSchema = new LinkedHashMap<String, Object>();
+			createProjectInputSchema.put("type", "object");
+			Map<String, Object> createProjectProperties = new LinkedHashMap<String, Object>();
+			createProjectProperties.put("name", propertySchema("string", "Name of the new project."));
+			Map<String, Object> createProjectType = propertySchema("string", "Project type to create.");
+			createProjectType.put("enum", Arrays.asList("utility", "integration", "business", "application", "testing"));
+			createProjectProperties.put("type", createProjectType);
+			createProjectInputSchema.put("properties", createProjectProperties);
+			createProjectInputSchema.put("required", Arrays.asList("name", "type"));
+			createProjectTool.put("inputSchema", createProjectInputSchema);
+			tools.add(createProjectTool);
 			Map<String, Object> skillsTool = new LinkedHashMap<String, Object>();
 			skillsTool.put("name", SKILLS_TOOL_NAME);
 			skillsTool.put("title", "Get nabu skills");
@@ -431,7 +453,7 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
+			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !CREATE_PROJECT_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
@@ -451,6 +473,9 @@ public class MCPREST {
 				}
 				else if (CREATE_TOOL_NAME.equals(name)) {
 					toolResult = createToolResult(arguments, meta, configuration);
+				}
+				else if (CREATE_PROJECT_TOOL_NAME.equals(name)) {
+					toolResult = createProjectToolResult(arguments);
 				}
 				else if (SKILLS_TOOL_NAME.equals(name)) {
 					toolResult = skillsToolResult(arguments);
@@ -485,8 +510,17 @@ public class MCPREST {
 
 	private ToolResult searchToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) throws IOException, ParseException {
 		MCPToolCallInput input = bind(arguments, MCPToolCallInput.class);
-		List<MCPFragmentSearchResult> results = search(input, meta, configuration);
-		Map<String, Object> structuredContent = optimizeResults(input.getPattern(), results);
+		List<MCPFragmentSearchResult> allResults = search(input, meta, configuration);
+		Integer limit = input != null && input.getLimit() != null && input.getLimit().intValue() > 0 ? input.getLimit() : null;
+		int offset = input != null && input.getOffset() != null && input.getOffset().intValue() >= 0 ? input.getOffset().intValue() : 0;
+		int from = Math.min(offset, allResults.size());
+		int to = limit == null ? allResults.size() : Math.min(from + limit.intValue(), allResults.size());
+		List<MCPFragmentSearchResult> page = new ArrayList<MCPFragmentSearchResult>(allResults.subList(from, to));
+		Map<String, Object> structuredContent = optimizeResults(input.getPattern(), page);
+		structuredContent.put("totalResults", allResults.size());
+		structuredContent.put("offset", offset);
+		structuredContent.put("limit", limit);
+		structuredContent.put("truncated", Boolean.TRUE.equals(structuredContent.get("truncated")) || to < allResults.size());
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildSearchDisplayMessage(structuredContent)));
 	}
@@ -838,9 +872,14 @@ public class MCPREST {
 	private RepositoryEntry ensureNamespace(String namespace) throws IOException {
 		EAIResourceRepository repository = EAIResourceRepository.getInstance();
 		RepositoryEntry entry = repository.getRoot();
-		for (String part : namespace.split("\\.")) {
+		String[] parts = namespace.split("\\.");
+		for (int i = 0; i < parts.length; i++) {
+			String part = parts[i];
 			Entry child = entry.getChild(part);
 			if (child == null) {
+				if (i == 0) {
+					throw new IOException("Project '" + part + "' does not exist.");
+				}
 				entry = entry.createDirectory(part);
 			}
 			else {
@@ -888,6 +927,12 @@ public class MCPREST {
 		Map<String, Object> structuredContent = createArtifact(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult createProjectToolResult(Map<String, Object> arguments) {
+		Map<String, Object> structuredContent = createProject(arguments);
+		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateProjectDisplayMessage(structuredContent)));
 	}
 
 	private ToolResult editToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
@@ -1009,9 +1054,9 @@ public class MCPREST {
 		String artifactId = string(arguments.get("artifactId"));
 		List<String> artifactTypes = stringList(arguments.get("artifactType"));
 		List<String> artifactCategories = stringList(arguments.get("artifactCategory"));
-		String path = string(arguments.get("path"));
 		String pattern = string(arguments.get("pattern"));
 		boolean glob = asBoolean(arguments.get("glob"));
+		boolean caseSensitive = booleanArgument(arguments.get("caseSensitive"), false);
 		int limit = integer(arguments.get("limit"), 200);
 		int offset = integer(arguments.get("offset"), 0);
 		if (limit <= 0) {
@@ -1022,16 +1067,13 @@ public class MCPREST {
 		}
 		List<FragmentSearch> fragments = server.getFragmentIndexService() == null
 			? Collections.<FragmentSearch>emptyList()
-			: server.getFragmentIndexService().search(".*", null, namespaces, artifactTypes, artifactCategories, 0, 0, 0);
+			: server.getFragmentIndexService().search(".*", null, namespaces, artifactTypes, artifactCategories, caseSensitive, 0, 0, 0);
 		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId != null && !artifactId.equals(fragment.getArtifactId())) {
 				continue;
 			}
-			if (path != null && !path.equals(fragment.getPath())) {
-				continue;
-			}
-			if (pattern != null && !pattern.trim().isEmpty() && !matchesFindPattern(pattern, glob, fragment.getArtifactId(), fragment.getPath())) {
+			if (pattern != null && !pattern.trim().isEmpty() && !matchesFindPattern(pattern, glob, caseSensitive, fragment.getArtifactId(), fragment.getPath())) {
 				continue;
 			}
 			Map<String, Object> entry = new LinkedHashMap<String, Object>();
@@ -1090,6 +1132,47 @@ public class MCPREST {
 			structuredContent.put("namespace", namespace);
 			structuredContent.put("name", name);
 			structuredContent.put("type", type);
+			return structuredContent;
+		}
+		catch (Exception e) {
+			return createErrorResult("CREATE_FAILED", firstExceptionMessage(e));
+		}
+	}
+
+	private Map<String, Object> createProject(Map<String, Object> arguments) {
+		String name = requiredString(arguments, "name", "MISSING_NAME");
+		String type = requiredString(arguments, "type", "MISSING_TYPE");
+		if (!isValidCreateName(name)) {
+			return createErrorResult("INVALID_NAME", "Invalid project name '" + name + "'. Names must match the strict repository naming convention and may not use reserved names.");
+		}
+		ProjectType projectType;
+		try {
+			projectType = ProjectType.valueOf(type.trim().toUpperCase());
+		}
+		catch (Exception e) {
+			return createErrorResult("UNKNOWN_TYPE", "Unknown project type '" + type + "'.");
+		}
+		try {
+			RepositoryEntry root = EAIResourceRepository.getInstance().getRoot();
+			if (root.getChild(name) != null) {
+				return createErrorResult("NAME_EXISTS", "A project or artifact named '" + name + "' already exists.");
+			}
+			RepositoryEntry newEntry = root.createDirectory(name);
+			CollectionImpl collection = new CollectionImpl();
+			collection.setType("project");
+			collection.setSubType(projectType.name().toLowerCase());
+			newEntry.setCollection(collection);
+			newEntry.saveCollection();
+			root.refresh(true);
+			reloadArtifactAfterMcpUpdate(newEntry.getId());
+			notifyCollaborationReload(newEntry.getId());
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("isError", false);
+			structuredContent.put("code", "CREATED");
+			structuredContent.put("message", "Created project '" + newEntry.getId() + "'.");
+			structuredContent.put("projectId", newEntry.getId());
+			structuredContent.put("name", name);
+			structuredContent.put("type", projectType.name().toLowerCase());
 			return structuredContent;
 		}
 		catch (Exception e) {
@@ -1261,14 +1344,19 @@ public class MCPREST {
 		}
 		int before = number(input == null ? null : input.getBeforeContext());
 		int after = number(input == null ? null : input.getAfterContext());
+		int offset = number(input == null ? null : input.getOffset());
 		if (input != null && input.getContext() != null) {
 			before = input.getContext();
 			after = input.getContext();
 		}
+		if (offset < 0) {
+			throw new HTTPException(400, "Argument 'offset' must be a non-negative integer.");
+		}
 		List<String> namespaces = resolveNamespaces(configuration, input == null ? null : input.getNamespace(), meta);
 		List<String> artifactTypes = input == null ? null : input.getArtifactType();
 		List<String> artifactCategories = input == null ? null : input.getArtifactCategory();
-		List<FragmentSearch> search = service.search(pattern, input == null ? null : input.getGlob(), namespaces, artifactTypes, artifactCategories, before, after, 0);
+		boolean caseSensitive = input != null && input.getCaseSensitive() != null ? input.getCaseSensitive().booleanValue() : false;
+		List<FragmentSearch> search = service.search(pattern, input == null ? null : input.getGlob(), namespaces, artifactTypes, artifactCategories, caseSensitive, before, after, 0);
 		List<MCPFragmentSearchResult> results = new ArrayList<MCPFragmentSearchResult>();
 		for (FragmentSearch fragment : search) {
 			results.add(new MCPFragmentSearchResult(fragment.getArtifactId(), fragment.getPath(), fragment.getArtifactType(), fragment.getArtifactCategory(), fragment.getFragmentType(), fragment.getContentType(), fragment.getProperties(), fragment.isEditable(), fragment.isRemovable(), groupMatches(fragment.getMatches())));
@@ -1355,14 +1443,27 @@ public class MCPREST {
 	}
 
 	private boolean asBoolean(Object value) {
+		return booleanArgument(value, false);
+	}
+
+	private boolean booleanArgument(Object value, boolean defaultValue) {
 		Object unwrapped = unwrap(value);
+		if (unwrapped == null) {
+			return defaultValue;
+		}
 		if (unwrapped instanceof Boolean) {
 			return ((Boolean) unwrapped).booleanValue();
 		}
 		if (unwrapped instanceof String) {
-			return "true".equalsIgnoreCase(((String) unwrapped).trim());
+			String trimmed = ((String) unwrapped).trim();
+			if ("true".equalsIgnoreCase(trimmed)) {
+				return true;
+			}
+			if ("false".equalsIgnoreCase(trimmed)) {
+				return false;
+			}
 		}
-		return false;
+		throw protocolError("INVALID_BOOLEAN", "Expected a boolean value.");
 	}
 
 	private String buildSummaryText(Map<String, Object> structuredContent) {
@@ -1390,7 +1491,7 @@ public class MCPREST {
 	private String buildSkillsDisplayMessage(Map<String, Object> structuredContent) {
 		Number count = (Number) structuredContent.get("count");
 		int total = count == null ? 0 : count.intValue();
-		return "Loaded editing guidance for " + total + " artifact type" + (total == 1 ? "." : "s.");
+		return "Loaded guidance for " + total + " skill" + (total == 1 ? "." : "s.");
 	}
 
 	private String buildInvokeDisplayMessage(Map<String, Object> structuredContent) {
@@ -1430,6 +1531,15 @@ public class MCPREST {
 		}
 		String artifactId = string(structuredContent.get("artifactId"));
 		return asBoolean(structuredContent.get("isError")) ? "Failed to create artifact." : "Created artifact '" + artifactId + "'.";
+	}
+
+	private String buildCreateProjectDisplayMessage(Map<String, Object> structuredContent) {
+		String message = string(structuredContent.get("message"));
+		if (message != null && !message.trim().isEmpty()) {
+			return message;
+		}
+		String projectId = string(structuredContent.get("projectId"));
+		return asBoolean(structuredContent.get("isError")) ? "Failed to create project." : "Created project '" + projectId + "'.";
 	}
 
 	private String buildEditDisplayMessage(Map<String, Object> structuredContent) {
@@ -2631,9 +2741,12 @@ public class MCPREST {
 		return false;
 	}
 
-	private boolean matchesFindPattern(String pattern, boolean glob, String artifactId, String path) {
+	private boolean matchesFindPattern(String pattern, boolean glob, boolean caseSensitive, String artifactId, String path) {
 		String candidate = artifactId + "/" + path;
 		String normalizedPattern = glob ? globToRegex(pattern) : pattern;
+		if (!caseSensitive) {
+			normalizedPattern = "(?i)" + normalizedPattern;
+		}
 		try {
 			return candidate.matches(normalizedPattern) || path.matches(normalizedPattern) || artifactId.matches(normalizedPattern);
 		}
@@ -2668,7 +2781,7 @@ public class MCPREST {
 			throw new HTTPException(503, "The fragment index service is unavailable.");
 		}
 		List<String> globs = Arrays.asList(path);
-		List<FragmentSearch> fragments = service.search(".*", globs, namespaces, null, null, 0, 0, 0);
+		List<FragmentSearch> fragments = service.search(".*", globs, namespaces, null, null, true, 0, 0, 0);
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId.equals(fragment.getArtifactId()) && path.equals(fragment.getPath())) {
 				return fragment;

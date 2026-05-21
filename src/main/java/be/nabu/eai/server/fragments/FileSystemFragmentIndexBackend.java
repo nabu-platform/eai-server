@@ -76,7 +76,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
-	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, int before, int after, int limit) {
+	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
 		ensureRipgrep();
 		List<String> command = new ArrayList<String>();
 		command.add("rg");
@@ -85,6 +85,9 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		command.add("--color");
 		command.add("never");
 		command.add("--no-heading");
+		if (!caseSensitive) {
+			command.add("--ignore-case");
+		}
 		command.add("--glob");
 		command.add("!*.properties");
 		for (String glob : filterValues(globs)) {
