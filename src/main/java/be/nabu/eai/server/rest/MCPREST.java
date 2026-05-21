@@ -33,14 +33,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import be.nabu.eai.repository.EAIRepositoryUtils;
+import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.ArtifactFragmentManager;
+import be.nabu.eai.repository.api.CreatableArtifactFragmentManager;
+import be.nabu.eai.repository.api.Entry;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager.ReviewResource;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
+import be.nabu.eai.repository.api.ExtensibleEntry;
 import be.nabu.eai.repository.api.Node;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.impl.ImpersonateToken;
+import be.nabu.eai.repository.resources.RepositoryEntry;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.POST;
@@ -110,6 +115,7 @@ public class MCPREST {
 	private static final String READ_TOOL_NAME = "read_nabu_artifact_fragment";
 	private static final String EDIT_TOOL_NAME = "edit_nabu_artifact_fragment";
 	private static final String WRITE_TOOL_NAME = "write_nabu_artifact_fragment";
+	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
 	private static final String INVOKE_TOOL_NAME = "invoke_nabu_service";
 	private static final String TRACE_SEARCH_TOOL_NAME = "search_nabu_service_trace";
@@ -238,6 +244,9 @@ public class MCPREST {
 			Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
 			findProperties.put("pattern", propertySchema("string", "Pattern to match against fragment paths or artifact ids."));
 			findProperties.put("artifactId", propertySchema("string", "Optional artifact id filter."));
+			Map<String, Object> findNamespace = propertySchema("array", "Optional artifact namespace filters. Matches the exact namespace and all descendant artifact ids. Configured and policy namespaces are applied first; this argument can only narrow further.");
+			findNamespace.put("items", schema("string"));
+			findProperties.put("namespace", findNamespace);
 			Map<String, Object> findArtifactType = propertySchema("array", "Optional artifact type filters. Do not pass this when 'artifactId' is provided or when 'artifactCategory' is filled in.");
 			Map<String, Object> findArtifactTypeItem = schema("string");
 			findArtifactTypeItem.put("enum", listAvailableArtifactTypes());
@@ -318,6 +327,29 @@ public class MCPREST {
 			writeTool.put("inputSchema", writeInputSchema);
 			writeTool.put("outputSchema", writeOutputSchema());
 			tools.add(writeTool);
+			List<String> creatableArtifactTypes = listCreatableArtifactTypes();
+			if (!creatableArtifactTypes.isEmpty()) {
+				Map<String, Object> createTool = new LinkedHashMap<String, Object>();
+				createTool.put("name", CREATE_TOOL_NAME);
+				createTool.put("title", "Create nabu artifact");
+				createTool.put("description", "Create a new nabu artifact in the given namespace using a creatable artifact fragment manager. Always read the `design:repository` skill before creating a new artifact for the first time.");
+				Map<String, Object> createAnnotations = new LinkedHashMap<String, Object>();
+				createAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+				createAnnotations.put("intentTemplate", "Creating {type}: {namespace}.{name}");
+				createTool.put("annotations", createAnnotations);
+				Map<String, Object> createInputSchema = new LinkedHashMap<String, Object>();
+				createInputSchema.put("type", "object");
+				Map<String, Object> createProperties = new LinkedHashMap<String, Object>();
+				createProperties.put("namespace", propertySchema("string", "Namespace where the new artifact should be created."));
+				createProperties.put("name", propertySchema("string", "Name of the new artifact."));
+				Map<String, Object> createType = propertySchema("string", "Artifact type to create.");
+				createType.put("enum", creatableArtifactTypes);
+				createProperties.put("type", createType);
+				createInputSchema.put("properties", createProperties);
+				createInputSchema.put("required", Arrays.asList("namespace", "name", "type"));
+				tools.add(createTool);
+				createTool.put("inputSchema", createInputSchema);
+			}
 			Map<String, Object> skillsTool = new LinkedHashMap<String, Object>();
 			skillsTool.put("name", SKILLS_TOOL_NAME);
 			skillsTool.put("title", "Get nabu skills");
@@ -399,7 +431,7 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
+			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
@@ -417,6 +449,9 @@ public class MCPREST {
 				else if (READ_TOOL_NAME.equals(name)) {
 					toolResult = readToolResult(arguments, meta, configuration);
 				}
+				else if (CREATE_TOOL_NAME.equals(name)) {
+					toolResult = createToolResult(arguments, meta, configuration);
+				}
 				else if (SKILLS_TOOL_NAME.equals(name)) {
 					toolResult = skillsToolResult(arguments);
 				}
@@ -427,7 +462,7 @@ public class MCPREST {
 					toolResult = traceSearchToolResult(arguments);
 				}
 				else {
-					boolean preview = isPreview(meta == null ? null : meta.get("preview"));
+					boolean preview = asBoolean(meta == null ? null : meta.get("preview"));
 					toolResult = EDIT_TOOL_NAME.equals(name)
 						? editToolResult(arguments, meta, configuration, preview)
 						: writeToolResult(arguments, meta, configuration, preview);
@@ -486,7 +521,7 @@ public class MCPREST {
 			ServiceRuntime.setGlobalContext(new LinkedHashMap<String, Object>());
 			ServiceRuntime.getGlobalContext().put("service.context", serviceContext == null || serviceContext.trim().isEmpty() ? serviceId : serviceContext);
 			ServiceRuntime.getGlobalContext().put("service.source", "mcp.invoke");
-			if (isPreview(arguments.get("trace"))) {
+			if (asBoolean(arguments.get("trace"))) {
 				traceRun = TraceRun.start(server.getRepository(), service);
 				if (executionContext.getServiceContext().getServiceTrackerProvider() instanceof be.nabu.eai.repository.api.ModifiableServiceRuntimeTrackerProvider) {
 					((be.nabu.eai.repository.api.ModifiableServiceRuntimeTrackerProvider) executionContext.getServiceContext().getServiceTrackerProvider()).addTracker(service, traceRun.tracker, true);
@@ -568,6 +603,9 @@ public class MCPREST {
 		for (String toolName : listToolSkills()) {
 			skills.add("tool:" + toolName);
 		}
+		for (String designSkill : listDesignSkills()) {
+			skills.add("design:" + designSkill);
+		}
 		return new ArrayList<String>(skills);
 	}
 
@@ -607,6 +645,28 @@ public class MCPREST {
 
 	private List<String> listToolSkills() {
 		return Collections.singletonList(INVOKE_TOOL_NAME);
+	}
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private List<String> listCreatableArtifactTypes() {
+		Set<String> artifactTypes = new LinkedHashSet<String>();
+		for (Class<CreatableArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), CreatableArtifactFragmentManager.class, false)) {
+			try {
+				CreatableArtifactFragmentManager manager = managerClass.newInstance();
+				String artifactType = artifactTypeForManager(manager);
+				if (artifactType != null) {
+					artifactTypes.add(artifactType);
+				}
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
+		return new ArrayList<String>(artifactTypes);
+	}
+
+	private List<String> listDesignSkills() {
+		return Collections.singletonList("repository");
 	}
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
@@ -657,7 +717,27 @@ public class MCPREST {
 				return buildInvokeSkillGuidelines();
 			}
 		}
+		if (skill.startsWith("design:")) {
+			String designSkill = skill.substring("design:".length()).trim();
+			String guidelines = loadClasspathSkill("design", designSkill);
+			if (guidelines != null) {
+				return guidelines;
+			}
+		}
 		throw protocolError("UNKNOWN_SKILL", "Unknown skill: " + skill);
+	}
+
+	private String loadClasspathSkill(String category, String name) {
+		if (category == null || name == null || category.trim().isEmpty() || name.trim().isEmpty()) {
+			return null;
+		}
+		String resourcePath = "/skills/" + category.trim() + "/" + name.trim() + ".md";
+		try {
+			return EAIRepositoryUtils.loadCachedClasspathResource(MCPREST.class, resourcePath);
+		}
+		catch (RuntimeException e) {
+			return null;
+		}
 	}
 
 	private String buildInvokeSkillGuidelines() {
@@ -692,6 +772,23 @@ public class MCPREST {
 	}
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private CreatableArtifactFragmentManager<?> findCreatableFragmentManagerByArtifactType(String artifactType) {
+		for (Class<CreatableArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), CreatableArtifactFragmentManager.class, false)) {
+			try {
+				CreatableArtifactFragmentManager manager = managerClass.newInstance();
+				String managerArtifactType = artifactTypeForManager(manager);
+				if (artifactType.equals(managerArtifactType)) {
+					return manager;
+				}
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
+		return null;
+	}
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private ArtifactFragmentManager<?> findFragmentManagerByArtifactType(String artifactType) {
 		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
 			try {
@@ -706,6 +803,56 @@ public class MCPREST {
 			}
 		}
 		return null;
+	}
+
+	private Map<String, Object> createErrorResult(String code, String message) {
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("isError", true);
+		structuredContent.put("code", code);
+		structuredContent.put("message", message);
+		return structuredContent;
+	}
+
+	private Map<String, Object> validateCreateArguments(String namespace, String name, String type, List<String> namespaces) {
+		if (!isValidCreateName(name)) {
+			return createErrorResult("INVALID_NAME", "Invalid artifact name '" + name + "'. Names must match the strict repository naming convention and may not use reserved names.");
+		}
+		if (type == null || !listCreatableArtifactTypes().contains(type)) {
+			return createErrorResult("UNKNOWN_TYPE", "Unknown creatable artifact type '" + type + "'.");
+		}
+		String[] parts = namespace.split("\\.");
+		for (String part : parts) {
+			if (!isValidCreateName(part)) {
+				return createErrorResult("INVALID_NAMESPACE", "Invalid namespace '" + namespace + "'. Each namespace part must match the strict repository naming convention and may not use reserved names.");
+			}
+		}
+		String artifactId = namespace + "." + name;
+		if (!isAllowedNamespace(artifactId, namespaces)) {
+			return createErrorResult("INVALID_NAMESPACE", "Artifact '" + artifactId + "' is outside the allowed namespaces.");
+		}
+		return null;
+	}
+
+	private RepositoryEntry ensureNamespace(String namespace) throws IOException {
+		EAIResourceRepository repository = EAIResourceRepository.getInstance();
+		RepositoryEntry entry = repository.getRoot();
+		for (String part : namespace.split("\\.")) {
+			Entry child = entry.getChild(part);
+			if (child == null) {
+				entry = entry.createDirectory(part);
+			}
+			else {
+				if (!(child instanceof RepositoryEntry) || child.isNode()) {
+					throw new IOException("An entry named '" + part + "' already exists in namespace path '" + namespace + "' and is not a folder.");
+				}
+				entry = (RepositoryEntry) child;
+			}
+		}
+		return entry;
+	}
+
+	private boolean isValidCreateName(String name) {
+		return name != null && EAIResourceRepository.isValidName(name) && !EAIResourceRepository.RESERVED.contains(name);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -733,6 +880,12 @@ public class MCPREST {
 		Map<String, Object> structuredContent = readArtifact(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildReadDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult createToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		Map<String, Object> structuredContent = createArtifact(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateDisplayMessage(structuredContent)));
 	}
 
 	private ToolResult editToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
@@ -850,13 +1003,13 @@ public class MCPREST {
 	}
 
 	private Map<String, Object> findArtifactFragments(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
-		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		List<String> namespaces = resolveNamespaces(configuration, stringList(arguments.get("namespace")), meta);
 		String artifactId = string(arguments.get("artifactId"));
 		List<String> artifactTypes = stringList(arguments.get("artifactType"));
 		List<String> artifactCategories = stringList(arguments.get("artifactCategory"));
 		String path = string(arguments.get("path"));
 		String pattern = string(arguments.get("pattern"));
-		boolean glob = isPreview(arguments.get("glob"));
+		boolean glob = asBoolean(arguments.get("glob"));
 		int limit = integer(arguments.get("limit"), 200);
 		int offset = integer(arguments.get("offset"), 0);
 		if (limit <= 0) {
@@ -903,6 +1056,43 @@ public class MCPREST {
 		structuredContent.put("offset", offset);
 		structuredContent.put("truncated", to < total);
 		return structuredContent;
+	}
+
+	private Map<String, Object> createArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String namespace = requiredString(arguments, "namespace", "MISSING_NAMESPACE");
+		String name = requiredString(arguments, "name", "MISSING_NAME");
+		String type = requiredString(arguments, "type", "MISSING_TYPE");
+		Map<String, Object> invalid = validateCreateArguments(namespace, name, type, namespaces);
+		if (invalid != null) {
+			return invalid;
+		}
+		CreatableArtifactFragmentManager<?> manager = findCreatableFragmentManagerByArtifactType(type);
+		if (manager == null) {
+			return createErrorResult("UNKNOWN_TYPE", "No creatable artifact manager found for type '" + type + "'.");
+		}
+		try {
+			RepositoryEntry parent = ensureNamespace(namespace);
+			if (parent.getChild(name) != null) {
+				return createErrorResult("NAME_EXISTS", "An entry named '" + name + "' already exists in namespace '" + namespace + "'.");
+			}
+			manager.createArtifact(parent, name);
+			String artifactId = parent.getId() + "." + name;
+			reloadArtifactAfterMcpUpdate(parent.getId());
+			notifyCollaborationReload(artifactId);
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("isError", false);
+			structuredContent.put("code", "CREATED");
+			structuredContent.put("message", "Created artifact '" + artifactId + "'.");
+			structuredContent.put("artifactId", artifactId);
+			structuredContent.put("namespace", namespace);
+			structuredContent.put("name", name);
+			structuredContent.put("type", type);
+			return structuredContent;
+		}
+		catch (Exception e) {
+			return createErrorResult("CREATE_FAILED", firstExceptionMessage(e));
+		}
 	}
 
 	private Map<String, Object> readArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -1116,7 +1306,7 @@ public class MCPREST {
 	private String buildEditSummaryText(Map<String, Object> structuredContent) {
 		Object updatedCount = structuredContent.get("updatedCount");
 		Object failedCount = structuredContent.get("failedCount");
-		boolean preview = isPreview(structuredContent.get("preview"));
+		boolean preview = asBoolean(structuredContent.get("preview"));
 		StringBuilder builder = new StringBuilder();
 		builder.append(preview ? "Previewed " : "Updated ").append(updatedCount).append(" fragments, ").append(failedCount).append(" failed");
 		@SuppressWarnings("unchecked")
@@ -1132,7 +1322,7 @@ public class MCPREST {
 	}
 
 	private String buildWriteSummaryText(Map<String, Object> structuredContent) {
-		boolean preview = isPreview(structuredContent.get("preview"));
+		boolean preview = asBoolean(structuredContent.get("preview"));
 		StringBuilder builder = new StringBuilder();
 		builder.append(preview ? "Previewed " : "Wrote ").append(structuredContent.get("path"));
 		if (structuredContent.get("message") != null) {
@@ -1162,7 +1352,7 @@ public class MCPREST {
 		return "Read " + count + " line(s) from " + path + " (start line " + startLine + ", total " + total + ").";
 	}
 
-	private boolean isPreview(Object value) {
+	private boolean asBoolean(Object value) {
 		Object unwrapped = unwrap(value);
 		if (unwrapped instanceof Boolean) {
 			return ((Boolean) unwrapped).booleanValue();
@@ -1203,7 +1393,7 @@ public class MCPREST {
 
 	private String buildInvokeDisplayMessage(Map<String, Object> structuredContent) {
 		String serviceId = string(structuredContent.get("serviceId"));
-		boolean isError = isPreview(structuredContent.get("isError"));
+		boolean isError = asBoolean(structuredContent.get("isError"));
 		return (isError ? "Service failed: " : "Service invoked: ") + serviceId;
 	}
 
@@ -1231,10 +1421,19 @@ public class MCPREST {
 		return "Read " + path + " from artifact " + artifactId + ".";
 	}
 
+	private String buildCreateDisplayMessage(Map<String, Object> structuredContent) {
+		String message = string(structuredContent.get("message"));
+		if (message != null && !message.trim().isEmpty()) {
+			return message;
+		}
+		String artifactId = string(structuredContent.get("artifactId"));
+		return asBoolean(structuredContent.get("isError")) ? "Failed to create artifact." : "Created artifact '" + artifactId + "'.";
+	}
+
 	private String buildEditDisplayMessage(Map<String, Object> structuredContent) {
 		Object count = structuredContent.get("count");
 		String path = string(structuredContent.get("path"));
-		boolean preview = isPreview(structuredContent.get("preview"));
+		boolean preview = asBoolean(structuredContent.get("preview"));
 		if (path != null) {
 			return (preview ? "Prepared preview for " : "Updated ") + path + ".";
 		}
@@ -1243,9 +1442,9 @@ public class MCPREST {
 
 	private String buildWriteDisplayMessage(Map<String, Object> structuredContent) {
 		String path = string(structuredContent.get("path"));
-		boolean preview = isPreview(structuredContent.get("preview"));
-		boolean updated = isPreview(structuredContent.get("updated"));
-		boolean isError = isPreview(structuredContent.get("isError"));
+		boolean preview = asBoolean(structuredContent.get("preview"));
+		boolean updated = asBoolean(structuredContent.get("updated"));
+		boolean isError = asBoolean(structuredContent.get("isError"));
 		if (preview) {
 			return "Prepared preview for " + path + ".";
 		}
@@ -2087,7 +2286,7 @@ public class MCPREST {
 
 	private String buildInvokeSummaryText(Map<String, Object> structuredContent) {
 		String serviceId = string(structuredContent.get("serviceId"));
-		boolean isError = isPreview(structuredContent.get("isError"));
+		boolean isError = asBoolean(structuredContent.get("isError"));
 		StringBuilder builder = new StringBuilder();
 		builder.append(isError ? "Invocation failed: " : "Invocation succeeded: ").append(serviceId);
 		if (structuredContent.get("traceId") != null) {
