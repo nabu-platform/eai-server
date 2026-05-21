@@ -647,15 +647,17 @@ public class MCPREST {
 		return Collections.singletonList(INVOKE_TOOL_NAME);
 	}
 
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings({ "rawtypes" })
 	private List<String> listCreatableArtifactTypes() {
 		Set<String> artifactTypes = new LinkedHashSet<String>();
-		for (Class<CreatableArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), CreatableArtifactFragmentManager.class, false)) {
+		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
 			try {
-				CreatableArtifactFragmentManager manager = managerClass.newInstance();
-				String artifactType = artifactTypeForManager(manager);
-				if (artifactType != null) {
-					artifactTypes.add(artifactType);
+				ArtifactFragmentManager manager = managerClass.newInstance();
+				if (manager instanceof CreatableArtifactFragmentManager) {
+					String artifactType = artifactTypeForManager(manager);
+					if (artifactType != null) {
+						artifactTypes.add(artifactType);
+					}
 				}
 			}
 			catch (Exception e) {
@@ -669,7 +671,7 @@ public class MCPREST {
 		return Collections.singletonList("repository");
 	}
 
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings({ "rawtypes" })
 	private List<String> listArtifactCategories() {
 		Set<String> artifactCategories = new LinkedHashSet<String>();
 		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
