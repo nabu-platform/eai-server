@@ -300,7 +300,7 @@ public class Standalone {
 		boolean historizeGauges = Boolean.parseBoolean(getArgument("historizeGauges", Boolean.toString(enableMetrics), args));
 		boolean anonymousIsRoot = Boolean.parseBoolean(getArgument("anonymousIsRoot", "true", args));
 		boolean startup = Boolean.parseBoolean(getArgument("startup", "true", args));
-		boolean logComplexEvents = Boolean.parseBoolean(getArgument("logComplexEvents", "true", args));
+		boolean logComplexEvents = Boolean.parseBoolean(getArgument("logComplexEvents", "false", args));
 		String cepService = getArgument("cepService", null, args);
 		long historizationInterval = Long.parseLong(getArgument("historizationInterval", "5000", args));
 		int historySize = Integer.parseInt(getArgument("historySize", "1000", args));

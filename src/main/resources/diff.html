@@ -192,6 +192,13 @@ tr.ctx-toggle td {
 	border-bottom: 1px solid color-mix(in srgb, var(--color-border-primary, #d8d7d1) 40%, var(--color-background-primary, #fdfdfb) 60%);
 }
 
+tr.diff-warning td {
+	padding: 0.375rem 0.5rem;
+	background: color-mix(in srgb, var(--color-background-warning, #7a5c1f) 35%, var(--color-background-primary, #fdfdfb));
+	color: var(--color-text-primary, #1f1f1b);
+	font-size: 0.75rem;
+}
+
 .ctx-cell {
 	text-align: center;
 }
@@ -445,18 +452,32 @@ table.diff.diff-layout-unified td.code {
 					}
 					parts.push(tokenHtml(type, text));
 				}
+				var wordPattern = /[A-Za-z_$][A-Za-z0-9_$-]*/y;
+				var numberPattern = /(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/y;
+				var operatorPattern = /(?:===|!==|==|!=|<=|>=|->|=>|&&|\|\||::|\+\+|--|\+=|-=|\*=|\/=|%=|&=|\|=|\^=|<<|>>|>>>|\.\.\.|\.\.|[+\-*/%<>=!&|^~?:])/y;
+				function isWhitespaceChar(char) {
+					return char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f" || char === "\v";
+				}
+				function isUppercaseLetter(char) {
+					return char >= "A" && char <= "Z";
+				}
+				function isPunctuationChar(char) {
+					return char === "(" || char === ")" || char === "{" || char === "}" || char === "[" || char === "]" || char === ";" || char === "," || char === ".";
+				}
 				function matchWordAt(text, index) {
-					var match = /^[A-Za-z_$][A-Za-z0-9_$-]*/.exec(text.slice(index));
+					wordPattern.lastIndex = index;
+					var match = wordPattern.exec(text);
 					return match ? match[0] : "";
 				}
 				function matchNumberAt(text, index) {
-					var match = /^(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(index));
+					numberPattern.lastIndex = index;
+					var match = numberPattern.exec(text);
 					return match ? match[0] : "";
 				}
 				function nextNonSpaceChar(text, index) {
 					for (var i = index; i < text.length; i += 1) {
 						var char = text.charAt(i);
-						if (!/\s/.test(char)) {
+						if (!isWhitespaceChar(char)) {
 							return char;
 						}
 					}
@@ -475,6 +496,13 @@ table.diff.diff-layout-unified td.code {
 				var scriptKeywords = createSet(["break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false", "finally", "for", "from", "function", "if", "import", "in", "instanceof", "let", "new", "null", "return", "super", "switch", "this", "throw", "true", "try", "typeof", "undefined", "var", "void", "while", "with", "yield", "async", "await", "implements", "interface", "package", "private", "protected", "public", "readonly", "type", "as", "satisfies", "asserts", "infer", "keyof", "namespace", "declare", "module"]);
 				var rustKeywords = createSet(["as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while"]);
 				var sqlKeywords = createSet(["select", "from", "where", "join", "left", "right", "inner", "outer", "on", "insert", "into", "update", "delete", "create", "alter", "drop", "table", "view", "index", "and", "or", "not", "null", "is", "in", "exists", "like", "group", "by", "order", "having", "limit", "offset", "distinct", "union", "all", "case", "when", "then", "else", "end", "values", "set", "returning"]);
+				var cssKeywords = createSet(["@media", "@supports", "@keyframes", "from", "to", "important"]);
+				var javaHighlightConfig = { lineComment: "//", blockComment: true, textBlock: true, annotation: true, keywordLookup: javaKeywords, typeLookup: javaTypes, uppercaseTypes: true, detectFunctions: true, functionKeywords: createSet(["void"]) };
+				var scriptHighlightConfig = { lineComment: "//", blockComment: true, altLineComment: "#", keywordLookup: scriptKeywords, uppercaseTypes: false, detectFunctions: true, functionKeywords: createSet(["function"]), variableKeywords: createSet(["const", "let", "var"]) };
+				var rustHighlightConfig = { lineComment: "//", blockComment: true, keywordLookup: rustKeywords, uppercaseTypes: true, detectFunctions: true, functionKeywords: createSet(["fn"]), variableKeywords: createSet(["let"]), allowVariableMut: true };
+				var sqlHighlightConfig = { lineComment: "--", altLineComment: null, blockComment: true, keywordLookup: sqlKeywords, uppercaseTypes: true, detectFunctions: true };
+				var bashHighlightConfig = { lineComment: "#", blockComment: false, keywordLookup: commonKeywords, uppercaseTypes: false, detectFunctions: true };
+				var cssHighlightConfig = { lineComment: null, altLineComment: null, blockComment: true, keywordLookup: cssKeywords, uppercaseTypes: false };
 				function tokenizeCodeLine(text, state, config) {
 					var parts = [];
 					var index = 0;
@@ -569,9 +597,9 @@ table.diff.diff-layout-unified td.code {
 							quote = current;
 							continue;
 						}
-						if (/\s/.test(current)) {
+						if (isWhitespaceChar(current)) {
 							var wsEnd = index + 1;
-							while (wsEnd < text.length && /\s/.test(text.charAt(wsEnd))) {
+							while (wsEnd < text.length && isWhitespaceChar(text.charAt(wsEnd))) {
 								wsEnd += 1;
 							}
 							pushToken(parts, null, text.slice(index, wsEnd));
@@ -616,7 +644,7 @@ table.diff.diff-layout-unified td.code {
 							else if (config.typeLookup && config.typeLookup[word]) {
 								tokenType = "class-name";
 							}
-							else if (/^[A-Z]/.test(word) && config.uppercaseTypes) {
+							else if (config.uppercaseTypes && isUppercaseLetter(word.charAt(0))) {
 								tokenType = "class-name";
 							}
 							else if (config.detectFunctions && nextNonSpaceChar(text, index + word.length) === "(") {
@@ -634,12 +662,13 @@ table.diff.diff-layout-unified td.code {
 							index += word.length;
 							continue;
 						}
-						if (/^[(){}\[\];,.]$/.test(current)) {
+						if (isPunctuationChar(current)) {
 							pushToken(parts, "punctuation", current);
 							index += 1;
 							continue;
 						}
-						var operatorMatch = /^(?:===|!==|==|!=|<=|>=|->|=>|&&|\|\||::|\+\+|--|\+=|-=|\*=|\/=|%=|&=|\|=|\^=|<<|>>|>>>|\.\.\.|\.\.|[+\-*/%<>=!&|^~?:])/.exec(text.slice(index));
+						operatorPattern.lastIndex = index;
+						var operatorMatch = operatorPattern.exec(text);
 						if (operatorMatch) {
 							pushToken(parts, "operator", operatorMatch[0]);
 							index += operatorMatch[0].length;
@@ -850,16 +879,16 @@ table.diff.diff-layout-unified td.code {
 					return { html: parts.join(""), nextState: state };
 				}
 				function highlightCssLine(text, state) {
-					return tokenizeCodeLine(text, state, { lineComment: null, altLineComment: null, blockComment: true, keywordLookup: createSet(["@media", "@supports", "@keyframes", "from", "to", "important"]), uppercaseTypes: false });
+					return tokenizeCodeLine(text, state, cssHighlightConfig);
 				}
 				function highlightJsonLine(text, state) {
 					var parts = [];
 					var index = 0;
 					while (index < text.length) {
 						var ch = text.charAt(index);
-						if (/\s/.test(ch)) {
+						if (isWhitespaceChar(ch)) {
 							var wsEnd = index + 1;
-							while (wsEnd < text.length && /\s/.test(text.charAt(wsEnd))) {
+							while (wsEnd < text.length && isWhitespaceChar(text.charAt(wsEnd))) {
 								wsEnd += 1;
 							}
 							pushToken(parts, null, text.slice(index, wsEnd));
@@ -913,19 +942,19 @@ table.diff.diff-layout-unified td.code {
 				}
 				function highlightLineWithState(text, languageType, state) {
 					if (languageType === "java") {
-						return tokenizeCodeLine(text, state, { lineComment: "//", blockComment: true, textBlock: true, annotation: true, keywordLookup: javaKeywords, typeLookup: javaTypes, uppercaseTypes: true, detectFunctions: true, functionKeywords: createSet(["void"]) });
+						return tokenizeCodeLine(text, state, javaHighlightConfig);
 					}
 					if (languageType === "script") {
-						return tokenizeCodeLine(text, state, { lineComment: "//", blockComment: true, altLineComment: "#", keywordLookup: scriptKeywords, uppercaseTypes: false, detectFunctions: true, functionKeywords: createSet(["function"]), variableKeywords: createSet(["const", "let", "var"]) });
+						return tokenizeCodeLine(text, state, scriptHighlightConfig);
 					}
 					if (languageType === "rust") {
-						return tokenizeCodeLine(text, state, { lineComment: "//", blockComment: true, keywordLookup: rustKeywords, uppercaseTypes: true, detectFunctions: true, functionKeywords: createSet(["fn"]), variableKeywords: createSet(["let"]), allowVariableMut: true });
+						return tokenizeCodeLine(text, state, rustHighlightConfig);
 					}
 					if (languageType === "sql") {
-						return tokenizeCodeLine(text, state, { lineComment: "--", altLineComment: null, blockComment: true, keywordLookup: sqlKeywords, uppercaseTypes: true, detectFunctions: true });
+						return tokenizeCodeLine(text, state, sqlHighlightConfig);
 					}
 					if (languageType === "bash") {
-						return tokenizeCodeLine(text, state, { lineComment: "#", blockComment: false, keywordLookup: commonKeywords, uppercaseTypes: false, detectFunctions: true });
+						return tokenizeCodeLine(text, state, bashHighlightConfig);
 					}
 					if (languageType === "css") {
 						return highlightCssLine(text, state);
@@ -961,68 +990,6 @@ table.diff.diff-layout-unified td.code {
 						lines.pop();
 					}
 					return lines;
-				}
-				function lcsMatrix(left, right) {
-					var rows = left.length + 1;
-					var cols = right.length + 1;
-					var matrix = new Array(rows);
-					for (var i = 0; i < rows; i += 1) {
-						matrix[i] = new Array(cols);
-						for (var j = 0; j < cols; j += 1) {
-							matrix[i][j] = 0;
-						}
-					}
-					for (var leftIndex = left.length - 1; leftIndex >= 0; leftIndex -= 1) {
-						for (var rightIndex = right.length - 1; rightIndex >= 0; rightIndex -= 1) {
-							if (left[leftIndex] === right[rightIndex]) {
-								matrix[leftIndex][rightIndex] = matrix[leftIndex + 1][rightIndex + 1] + 1;
-							}
-							else {
-								matrix[leftIndex][rightIndex] = Math.max(matrix[leftIndex + 1][rightIndex], matrix[leftIndex][rightIndex + 1]);
-							}
-						}
-					}
-					return matrix;
-				}
-				function buildChanges(originalText, newText) {
-					var left = normalizeLines(originalText);
-					var right = normalizeLines(newText);
-					var matrix = lcsMatrix(left, right);
-					var changes = [];
-					var i = 0;
-					var j = 0;
-					var leftLine = 1;
-					var rightLine = 1;
-					while (i < left.length && j < right.length) {
-						if (left[i] === right[j]) {
-							changes.push({ type: "equal", originalLine: leftLine, newLine: rightLine, text: left[i] });
-							i += 1;
-							j += 1;
-							leftLine += 1;
-							rightLine += 1;
-						}
-						else if (matrix[i + 1][j] >= matrix[i][j + 1]) {
-							changes.push({ type: "delete", originalLine: leftLine, newLine: null, text: left[i] });
-							i += 1;
-							leftLine += 1;
-						}
-						else {
-							changes.push({ type: "insert", originalLine: null, newLine: rightLine, text: right[j] });
-							j += 1;
-							rightLine += 1;
-						}
-					}
-					while (i < left.length) {
-						changes.push({ type: "delete", originalLine: leftLine, newLine: null, text: left[i] });
-						i += 1;
-						leftLine += 1;
-					}
-					while (j < right.length) {
-						changes.push({ type: "insert", originalLine: null, newLine: rightLine, text: right[j] });
-						j += 1;
-						rightLine += 1;
-					}
-					return changes;
 				}
 				function buildBlocks(changes) {
 					var blocks = [];
@@ -1104,66 +1071,86 @@ table.diff.diff-layout-unified td.code {
 					var source = text == null ? "" : String(text);
 					return "<pre class='code-block language-" + language + "'><code class='language-" + language + "' data-raw='" + escapeHtml(source) + "'>" + (highlightedHtml || escapeHtml(source)) + "</code></pre>";
 				}
-				function renderUnifiedRow(change, language, lineSets, extraClass) {
-					var rowClass = extraClass ? (change.type === "equal" ? "eq " : change.type === "delete" ? "del " : "ins ") + extraClass : (change.type === "equal" ? "eq" : change.type === "delete" ? "del" : "ins");
-					if (change.type === "delete") {
-						return "<tr class='" + rowClass + "'><td class='ln'>" + change.originalLine + "</td><td class='ln'></td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td></tr>";
-					}
-					if (change.type === "insert") {
-						return "<tr class='" + rowClass + "'><td class='ln'></td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
-					}
-					return "<tr class='" + rowClass + "'><td class='ln'>" + change.originalLine + "</td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1] || lineSets.original[change.originalLine - 1]) + "</td></tr>";
+				function rowClassName(changeType, extraClass) {
+					var baseClass = changeType === "equal" ? "eq" : changeType === "delete" ? "del" : "ins";
+					return extraClass ? baseClass + " " + extraClass : baseClass;
 				}
-				function renderSplitRow(change, language, lineSets, extraClass) {
-					var rowClass = extraClass ? (change.type === "equal" ? "eq " : change.type === "delete" ? "del " : "ins ") + extraClass : (change.type === "equal" ? "eq" : change.type === "delete" ? "del" : "ins");
+				function rowOpenTag(changeType, extraClass, group) {
+					var attributes = "<tr class='" + rowClassName(changeType, extraClass) + "'";
+					if (group != null) {
+						attributes += " data-group='" + group + "'";
+					}
+					return attributes + ">";
+				}
+				function renderUnifiedRow(change, language, lineSets, extraClass, group) {
+					var rowStart = rowOpenTag(change.type, extraClass, group);
 					if (change.type === "delete") {
-						return "<tr class='" + rowClass + "'><td class='ln'>" + change.originalLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td><td class='ln'></td><td class='code'></td></tr>";
+						return rowStart + "<td class='ln'>" + change.originalLine + "</td><td class='ln'></td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td></tr>";
 					}
 					if (change.type === "insert") {
-						return "<tr class='" + rowClass + "'><td class='ln'></td><td class='code'></td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
+						return rowStart + "<td class='ln'></td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
 					}
-					return "<tr class='" + rowClass + "'><td class='ln'>" + change.originalLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
+					return rowStart + "<td class='ln'>" + change.originalLine + "</td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1] || lineSets.original[change.originalLine - 1]) + "</td></tr>";
+				}
+				function renderSplitRow(change, language, lineSets, extraClass, group) {
+					var rowStart = rowOpenTag(change.type, extraClass, group);
+					if (change.type === "delete") {
+						return rowStart + "<td class='ln'>" + change.originalLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td><td class='ln'></td><td class='code'></td></tr>";
+					}
+					if (change.type === "insert") {
+						return rowStart + "<td class='ln'></td><td class='code'></td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
+					}
+					return rowStart + "<td class='ln'>" + change.originalLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.original[change.originalLine - 1]) + "</td><td class='ln'>" + change.newLine + "</td><td class='code'>" + renderCodeCell(change.text, language, lineSets.current[change.newLine - 1]) + "</td></tr>";
 				}
 				function renderToggleRow(block, colspan) {
 					return "<tr class='ctx-toggle' data-group='" + block.group + "'><td class='code ctx-cell' colspan='" + colspan + "'><button class='ctx-btn' data-group='" + block.group + "' data-collapsed='" + escapeHtml(block.collapsedLabel) + "' data-expanded='" + escapeHtml(block.expandedLabel) + "' aria-expanded='false'>" + escapeHtml(block.collapsedLabel) + "</button></td></tr>";
 				}
-				function renderUnified(blocks, language, lineSets) {
-					var html = "";
+				function renderWarningRow(message, colspan) {
+					return "<tr class='diff-warning'><td colspan='" + colspan + "'>" + escapeHtml(message) + "</td></tr>";
+				}
+				function renderUnified(blocks, language, lineSets, warningMessage) {
+					var html = [];
+					if (warningMessage) {
+						html.push(renderWarningRow(warningMessage, 3));
+					}
 					blocks.forEach(function (block) {
 						if (block.type === "collapsed") {
-							html += renderToggleRow(block, 3);
+							html.push(renderToggleRow(block, 3));
 							block.rows.forEach(function (row) {
-								html += renderUnifiedRow(row, language, lineSets, "ctx-row").replace("<tr class='", "<tr data-group='" + block.group + "' class='");
+								html.push(renderUnifiedRow(row, language, lineSets, "ctx-row", block.group));
 							});
 							return;
 						}
 						block.rows.forEach(function (row) {
-							html += renderUnifiedRow(row, language, lineSets, "");
+							html.push(renderUnifiedRow(row, language, lineSets, "", null));
 						});
 					});
-					return html;
+					return html.join("");
 				}
-				function renderSplit(blocks, language, lineSets) {
-					var html = "";
+				function renderSplit(blocks, language, lineSets, warningMessage) {
+					var html = [];
+					if (warningMessage) {
+						html.push(renderWarningRow(warningMessage, 4));
+					}
 					blocks.forEach(function (block) {
 						if (block.type === "collapsed") {
-							html += renderToggleRow(block, 4);
+							html.push(renderToggleRow(block, 4));
 							block.rows.forEach(function (row) {
-								html += renderSplitRow(row, language, lineSets, "ctx-row").replace("<tr class='", "<tr data-group='" + block.group + "' class='");
+								html.push(renderSplitRow(row, language, lineSets, "ctx-row", block.group));
 							});
 							return;
 						}
 						if (block.type === "change") {
 							for (var index = 0; index < block.rows.length; index += 1) {
-								html += renderSplitRow(block.rows[index], language, lineSets, "");
+								html.push(renderSplitRow(block.rows[index], language, lineSets, "", null));
 							}
 							return;
 						}
 						block.rows.forEach(function (row) {
-							html += renderSplitRow(row, language, lineSets, "");
+							html.push(renderSplitRow(row, language, lineSets, "", null));
 						});
 					});
-					return html;
+					return html.join("");
 				}
 				function setView(view) {
 					document.body.setAttribute("data-view", view);
@@ -1185,12 +1172,20 @@ table.diff.diff-layout-unified td.code {
 					btn.setAttribute("aria-expanded", open ? "true" : "false");
 				}
 				function bindContextToggles() {
+					var groupedRows = Object.create(null);
+					document.querySelectorAll("tr.ctx-row[data-group]").forEach(function (row) {
+						var group = row.getAttribute("data-group");
+						if (!groupedRows[group]) {
+							groupedRows[group] = [];
+						}
+						groupedRows[group].push(row);
+					});
 					document.querySelectorAll("button.ctx-btn").forEach(function (btn) {
 						updateContextButton(btn, false);
 						btn.addEventListener("click", function () {
 							var group = btn.getAttribute("data-group");
 							var open = btn.getAttribute("aria-expanded") !== "true";
-							document.querySelectorAll("tr.ctx-row[data-group='" + group + "']").forEach(function (row) {
+							(groupedRows[group] || []).forEach(function (row) {
 								row.classList.toggle("ctx-open", open);
 							});
 							updateContextButton(btn, open);
@@ -1229,22 +1224,128 @@ table.diff.diff-layout-unified td.code {
 							}
 						}
 					}
-					return changes;
+					return { changes: changes };
+				}
+				function buildChangesFromUnifiedDiff(originalText, diffText, language) {
+					if (typeof diffText !== "string" || !diffText) {
+						return null;
+					}
+					var originalLines = normalizeLines(originalText);
+					var currentLineHtml = [];
+					var changes = [];
+					var diffLines = normalizeLines(diffText);
+					var languageType = classifyLanguage(language);
+					var state = {};
+					var originalIndex = 0;
+					var newIndex = 0;
+					var seenHunk = false;
+					function pushCurrentLine(text) {
+						var result = highlightLineWithState(text, languageType, state);
+						state = result.nextState || {};
+						currentLineHtml.push(result.html);
+					}
+					for (var index = 0; index < diffLines.length; index += 1) {
+						var line = diffLines[index];
+						if (!seenHunk) {
+							if (line.slice(0, 2) === "@@") {
+								seenHunk = true;
+							}
+							else {
+								continue;
+							}
+						}
+						if (line.slice(0, 2) === "@@") {
+							var match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+							if (!match) {
+								return null;
+							}
+							var targetOriginalIndex = Math.max(parseInt(match[1], 10) - 1, 0);
+							while (originalIndex < targetOriginalIndex && originalIndex < originalLines.length) {
+								var equalText = originalLines[originalIndex];
+								changes.push({ type: "equal", originalLine: originalIndex + 1, newLine: newIndex + 1, text: equalText });
+								pushCurrentLine(equalText);
+								originalIndex += 1;
+								newIndex += 1;
+							}
+							continue;
+						}
+						if (!line) {
+							continue;
+						}
+						var marker = line.charAt(0);
+						var text = line.slice(1);
+						if (marker === " ") {
+							changes.push({ type: "equal", originalLine: originalIndex + 1, newLine: newIndex + 1, text: text });
+							pushCurrentLine(text);
+							originalIndex += 1;
+							newIndex += 1;
+							continue;
+						}
+						if (marker === "-") {
+							changes.push({ type: "delete", originalLine: originalIndex + 1, newLine: null, text: text });
+							originalIndex += 1;
+							continue;
+						}
+						if (marker === "+") {
+							changes.push({ type: "insert", originalLine: null, newLine: newIndex + 1, text: text });
+							pushCurrentLine(text);
+							newIndex += 1;
+							continue;
+						}
+						if (line === "\\ No newline at end of file") {
+							continue;
+						}
+						return null;
+					}
+					while (originalIndex < originalLines.length) {
+						var trailingText = originalLines[originalIndex];
+						changes.push({ type: "equal", originalLine: originalIndex + 1, newLine: newIndex + 1, text: trailingText });
+						pushCurrentLine(trailingText);
+						originalIndex += 1;
+						newIndex += 1;
+					}
+					return {
+						changes: changes,
+						currentHtml: currentLineHtml
+					};
+				}
+				function buildCollapsedOriginalChanges(originalText) {
+					var originalLines = normalizeLines(originalText);
+					var changes = [];
+					for (var index = 0; index < originalLines.length; index += 1) {
+						changes.push({ type: "equal", originalLine: index + 1, newLine: index + 1, text: originalLines[index] });
+					}
+					return {
+						changes: changes,
+						warningMessage: "Diff unavailable or invalid. Showing original content only."
+					};
 				}
 				function renderFromStructuredContent(structuredContent) {
 					structuredContent = structuredContent || {};
 					var path = structuredContent.path || "";
 					var language = prismLanguage(path);
 					var originalText = structuredContent.original || "";
-					var newText = structuredContent.new || "";
-					var changes = normalizeStructuredDiff(structuredContent.diff) || buildChanges(originalText, newText);
+					var parsed = normalizeStructuredDiff(structuredContent.diff);
+					if (!parsed) {
+						parsed = buildChangesFromUnifiedDiff(originalText, structuredContent.diff, language);
+					}
+					if (!parsed) {
+						parsed = buildCollapsedOriginalChanges(originalText);
+					}
+					var changes = parsed.changes;
 					var blocks = buildBlocks(changes);
 					var lineSets = {
 						original: buildHighlightedLines(originalText, language),
-						current: buildHighlightedLines(newText, language)
+						current: parsed.currentHtml || []
 					};
-					document.getElementById("unified-body").innerHTML = renderUnified(blocks, language, lineSets);
-					document.getElementById("split-body").innerHTML = renderSplit(blocks, language, lineSets);
+					for (var changeIndex = 0; changeIndex < changes.length; changeIndex += 1) {
+						var change = changes[changeIndex];
+						if (change.type === "equal" && change.originalLine != null && change.newLine != null) {
+							lineSets.current[change.newLine - 1] = lineSets.original[change.originalLine - 1];
+						}
+					}
+					document.getElementById("unified-body").innerHTML = renderUnified(blocks, language, lineSets, parsed.warningMessage || "");
+					document.getElementById("split-body").innerHTML = renderSplit(blocks, language, lineSets, parsed.warningMessage || "");
 					bindContextToggles();
 				}
 				var stored = null;

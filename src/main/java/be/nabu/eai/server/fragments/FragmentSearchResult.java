@@ -78,6 +78,11 @@ public class FragmentSearchResult implements ArtifactFragment {
 		return properties;
 	}
 
+	@Override
+	public Long getLastModified() {
+		return null;
+	}
+
 	public List<String> getMatches() {
 		return matches;
 	}

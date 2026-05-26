@@ -40,6 +40,7 @@ import be.nabu.eai.repository.api.CreatableArtifactFragmentManager;
 import be.nabu.eai.repository.api.Entry;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager.ReviewResource;
+import be.nabu.eai.repository.impl.StreamHiderContent;
 import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
 import be.nabu.eai.repository.api.ExtensibleEntry;
@@ -92,21 +93,37 @@ public class MCPREST {
 		private final Map<String, Object> structuredContent;
 		private final List<Map<String, String>> content;
 		private final Map<String, Object> meta;
+		private final Boolean isError;
+		private final String message;
 
 		private ToolResult(Map<String, Object> structuredContent, List<Map<String, String>> content, Map<String, Object> meta) {
+			this(structuredContent, content, meta, null, null);
+		}
+
+		private ToolResult(Map<String, Object> structuredContent, List<Map<String, String>> content, Map<String, Object> meta, Boolean isError, String message) {
 			this.structuredContent = structuredContent;
 			this.content = content;
 			this.meta = meta;
+			this.isError = isError;
+			this.message = message;
 		}
 	}
 
 	private static class EditArtifactResult {
 		private final Map<String, Object> structuredContent;
 		private final String resourceUri;
+		private final Boolean isError;
+		private final String message;
 
 		private EditArtifactResult(Map<String, Object> structuredContent, String resourceUri) {
+			this(structuredContent, resourceUri, null, null);
+		}
+
+		private EditArtifactResult(Map<String, Object> structuredContent, String resourceUri, Boolean isError, String message) {
 			this.structuredContent = structuredContent;
 			this.resourceUri = resourceUri;
+			this.isError = isError;
+			this.message = message;
 		}
 	}
 
@@ -154,16 +171,23 @@ public class MCPREST {
 			MCPConfiguration configuration = new MCPConfiguration();
 			applyInitializeConfiguration(configuration, map(rpc.get("params")));
 			storeSession(sessionId, configuration);
+			ensureStaticReviewResource();
 			Map<String, Object> result = new LinkedHashMap<String, Object>();
 			result.put("protocolVersion", MCP_VERSION);
 			Map<String, Object> capabilities = new LinkedHashMap<String, Object>();
 			Map<String, Object> experimental = new LinkedHashMap<String, Object>();
-			experimental.put("policy", true);
+			Map<String, Object> policy = new LinkedHashMap<String, Object>();
+			policy.put("enabled", true);
+			experimental.put("policy", policy);
 			capabilities.put("experimental", experimental);
 			Map<String, Object> resources = new LinkedHashMap<String, Object>();
 			resources.put("list", true);
 			resources.put("read", true);
 			capabilities.put("resources", resources);
+			Map<String, Object> tools = new LinkedHashMap<String, Object>();
+			tools.put("list", true);
+			tools.put("call", true);
+			capabilities.put("tools", tools);
 			result.put("capabilities", capabilities);
 			Map<String, Object> serverInfo = new LinkedHashMap<String, Object>();
 			serverInfo.put("name", "nabu-mcp");
@@ -216,13 +240,13 @@ public class MCPREST {
 			Map<String, Object> searchArtifactTypeItem = schema("string");
 			searchArtifactTypeItem.put("enum", listAvailableArtifactTypes());
 			searchArtifactTypes.put("items", searchArtifactTypeItem);
-			searchArtifactTypes.put("description", "Optional artifact type filters. Do not pass this when 'artifactId' is provided or when 'artifactCategory' is filled in.");
+			searchArtifactTypes.put("description", "Optional artifact type filters. Do not pass this when 'artifactCategory' is filled in.");
 			searchProperties.put("artifactType", searchArtifactTypes);
 			Map<String, Object> searchArtifactCategories = schema("array");
 			Map<String, Object> searchArtifactCategoryItem = schema("string");
 			searchArtifactCategoryItem.put("enum", listAvailableArtifactCategories());
 			searchArtifactCategories.put("items", searchArtifactCategoryItem);
-			searchArtifactCategories.put("description", "Optional artifact category filters. Do not pass this when 'artifactId' is provided.");
+			searchArtifactCategories.put("description", "Optional artifact category filters.");
 			searchProperties.put("artifactCategory", searchArtifactCategories);
 			searchProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
 			searchProperties.put("beforeContext", schema("integer"));
@@ -296,16 +320,19 @@ public class MCPREST {
 			Map<String, Object> editAnnotations = new LinkedHashMap<String, Object>();
 			editAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
 			editAnnotations.put("preview", true);
-			editAnnotations.put("intentTemplate", "Edit [{edits.path}] in artifact [{edits.artifactId}]");
+			editAnnotations.put("intentTemplate", "Edit artifact {artifactId} fragment {path}");
 			editTool.put("annotations", editAnnotations);
 			Map<String, Object> editInputSchema = new LinkedHashMap<String, Object>();
 			editInputSchema.put("type", "object");
 			Map<String, Object> editProperties = new LinkedHashMap<String, Object>();
+			editProperties.put("artifactId", propertySchema("string", "Artifact id containing the fragment."));
+			editProperties.put("path", propertySchema("string", "Path to the fragment inside the artifact."));
 			editProperties.put("edits", editSchema());
 			editInputSchema.put("properties", editProperties);
-			editInputSchema.put("required", Arrays.asList("edits"));
+			editInputSchema.put("required", Arrays.asList("artifactId", "path", "edits"));
 			editTool.put("inputSchema", editInputSchema);
 			editTool.put("outputSchema", editOutputSchema());
+			editTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
 			tools.add(editTool);
 			Map<String, Object> writeTool = new LinkedHashMap<String, Object>();
 			writeTool.put("name", WRITE_TOOL_NAME);
@@ -329,6 +356,7 @@ public class MCPREST {
 			writeInputSchema.put("required", Arrays.asList("artifactId", "path", "content"));
 			writeTool.put("inputSchema", writeInputSchema);
 			writeTool.put("outputSchema", writeOutputSchema());
+			writeTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
 			tools.add(writeTool);
 			List<String> creatableArtifactTypes = listCreatableArtifactTypes();
 			if (!creatableArtifactTypes.isEmpty()) {
@@ -498,6 +526,12 @@ public class MCPREST {
 			}
 			result.put("content", toolResult.content);
 			result.put("structuredContent", toolResult.structuredContent);
+			if (toolResult.isError != null) {
+				result.put("isError", toolResult.isError);
+			}
+			if (toolResult.message != null) {
+				result.put("message", toolResult.message);
+			}
 			if (toolResult.meta != null && !toolResult.meta.isEmpty()) {
 				result.put("_meta", toolResult.meta);
 			}
@@ -575,14 +609,12 @@ public class MCPREST {
 				structuredContent.put("traceId", traceRun.traceId);
 			}
 			if (serviceResult.getException() != null) {
-				structuredContent.put("isError", true);
 				structuredContent.put("exception", stacktrace(serviceResult.getException()));
-				return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildInvokeDisplayMessage(structuredContent)));
+				return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildInvokeDisplayMessage(true, structuredContent)), true, firstExceptionMessage(serviceResult.getException()));
 			}
 			Object output = unwrap(serviceResult.getOutput());
-			structuredContent.put("isError", false);
 			structuredContent.put("output", output);
-			return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildInvokeDisplayMessage(structuredContent)));
+			return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildInvokeDisplayMessage(false, structuredContent)), false, null);
 		}
 		catch (HTTPException e) {
 			throw e;
@@ -843,9 +875,7 @@ public class MCPREST {
 
 	private Map<String, Object> createErrorResult(String code, String message) {
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("isError", true);
 		structuredContent.put("code", code);
-		structuredContent.put("message", message);
 		return structuredContent;
 	}
 
@@ -926,127 +956,115 @@ public class MCPREST {
 	private ToolResult createToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		Map<String, Object> structuredContent = createArtifact(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
-		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateDisplayMessage(structuredContent)));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
 	}
 
 	private ToolResult createProjectToolResult(Map<String, Object> arguments) {
 		Map<String, Object> structuredContent = createProject(arguments);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
-		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateProjectDisplayMessage(structuredContent)));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateProjectDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
 	}
 
 	private ToolResult editToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		EditArtifactResult editResult = editArtifact(arguments, meta, configuration, preview);
 		List<Map<String, String>> content = textContent(buildEditSummaryText(editResult.structuredContent));
 		Map<String, Object> toolMeta = buildToolMeta(editResult.resourceUri, buildEditDisplayMessage(editResult.structuredContent));
-		return new ToolResult(editResult.structuredContent, content, toolMeta);
+		return new ToolResult(editResult.structuredContent, content, toolMeta, editResult.isError, editResult.message);
 	}
 
 	private ToolResult writeToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		EditArtifactResult writeResult = writeArtifact(arguments, meta, configuration, preview);
 		List<Map<String, String>> content = textContent(buildWriteSummaryText(writeResult.structuredContent));
 		Map<String, Object> toolMeta = buildToolMeta(writeResult.resourceUri, buildWriteDisplayMessage(writeResult.structuredContent));
-		return new ToolResult(writeResult.structuredContent, content, toolMeta);
+		return new ToolResult(writeResult.structuredContent, content, toolMeta, writeResult.isError, writeResult.message);
 	}
 
 	private EditArtifactResult editArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		List<String> namespaces = resolveNamespaces(configuration, null, meta);
-		List<Map<String, String>> edits = extractEdits(arguments);
-		List<Map<String, Object>> operations = new ArrayList<Map<String, Object>>();
-		for (Map<String, String> edit : edits) {
-			String artifactId = edit.get("artifactId");
-			String path = edit.get("path");
-			if (!isAllowedNamespace(artifactId, namespaces)) {
-				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' is outside the allowed namespaces.");
-			}
-			Node currentNode = server.getRepository().getNode(artifactId);
-			if (currentNode == null) {
-				throw protocolError("INVALID_PATH", "Artifact not found: '" + artifactId + "'.");
-			}
-			Artifact currentArtifact = (Artifact) currentNode.getArtifact();
-			ArtifactFragmentManager<Artifact> currentManager = EAIRepositoryUtils.getArtifactFragmentManager(currentArtifact);
-			if (currentManager == null) {
-				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support fragment access.");
-			}
-			ArtifactFragment currentFragment = findEditableFragment(currentManager, currentArtifact, artifactId, path);
-			String currentContent = currentFragment.getContent();
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		if (!isAllowedNamespace(artifactId, namespaces)) {
+			throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' is outside the allowed namespaces.");
+		}
+		Node currentNode = server.getRepository().getNode(artifactId);
+		if (currentNode == null) {
+			throw protocolError("INVALID_PATH", "Artifact not found: '" + artifactId + "'.");
+		}
+		Artifact currentArtifact = (Artifact) currentNode.getArtifact();
+		ArtifactFragmentManager<Artifact> currentManager = EAIRepositoryUtils.getArtifactFragmentManager(currentArtifact);
+		if (currentManager == null) {
+			throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support fragment access.");
+		}
+		ArtifactFragment currentFragment = findEditableFragment(currentManager, currentArtifact, artifactId, path);
+		String before = currentFragment.getContent();
+		String after = before;
+		int totalMatchCount = 0;
+		for (Map<String, String> edit : extractEdits(arguments, artifactId, path)) {
 			String find = edit.get("find");
-			int matchCount = countMatches(currentContent, find);
+			int matchCount = countMatches(after, find);
 			if (matchCount == 0) {
 				throw protocolError("FIND_NOT_FOUND", "No match found for the requested 'find' text in artifact '" + artifactId + "' at path '" + path + "'.");
 			}
 			if (matchCount > 1) {
 				throw protocolError("FIND_NOT_UNIQUE", "The requested 'find' text matches multiple locations in artifact '" + artifactId + "' at path '" + path + "'. Provide a more specific match.");
 			}
-			Map<String, Object> operation = new LinkedHashMap<String, Object>();
-			operation.put("artifactId", artifactId);
-			operation.put("path", path);
-			operation.put("artifact", currentArtifact);
-			operation.put("manager", currentManager);
-			operation.put("before", currentContent);
-			operation.put("after", currentContent.replace(find, edit.get("replace")));
-			operation.put("matchCount", matchCount);
-			operations.add(operation);
+			after = after.replace(find, edit.get("replace"));
+			totalMatchCount += matchCount;
 		}
-		List<Map<String, Object>> updates = new ArrayList<Map<String, Object>>();
+		Map<String, Object> operation = new LinkedHashMap<String, Object>();
+		operation.put("artifactId", artifactId);
+		operation.put("path", path);
+		operation.put("artifact", currentArtifact);
+		operation.put("manager", currentManager);
+		operation.put("before", before);
+		operation.put("after", after);
+		operation.put("matchCount", totalMatchCount);
+		Map<String, Object> update = new LinkedHashMap<String, Object>();
+		update.put("artifactId", artifactId);
+		update.put("path", path);
+		update.put("matchCount", totalMatchCount);
+		update.put("original", before);
+		update.put("new", after);
+		update.put("diff", buildFallbackDiff(Arrays.asList(operation)));
 		int successCount = 0;
-		for (Map<String, Object> operation : operations) {
-			Map<String, Object> update = new LinkedHashMap<String, Object>();
-			String artifactId = (String) operation.get("artifactId");
-			String path = (String) operation.get("path");
-			update.put("artifactId", artifactId);
-			update.put("path", path);
-			update.put("matchCount", operation.get("matchCount"));
-			if (preview) {
-				update.put("updated", false);
-				update.put("preview", true);
-				successCount++;
-			}
-			else {
-				try {
-					@SuppressWarnings("unchecked")
-					ArtifactFragmentManager<Artifact> currentManager = (ArtifactFragmentManager<Artifact>) operation.get("manager");
-					Artifact currentArtifact = (Artifact) operation.get("artifact");
-					String before = (String) operation.get("before");
-					String after = (String) operation.get("after");
-					List<Validation<?>> validations = currentManager.updateFragment(currentArtifact, path, before, after);
-					update.put("updated", !hasErrors(validations));
-					if (validations != null && !validations.isEmpty()) {
-						update.put("validations", validationMaps(validations));
-					}
-					if (hasErrors(validations)) {
-						update.put("error", buildValidationMessage(validations));
-					}
-					else {
-						reloadArtifactAfterMcpUpdate(artifactId);
-						notifyCollaborationReload(artifactId);
-						successCount++;
-					}
+		if (preview) {
+			successCount = 1;
+		}
+		else {
+			try {
+				List<Validation<?>> validations = currentManager.updateFragment(currentArtifact, path, before, after);
+				if (validations != null && !validations.isEmpty()) {
+					update.put("validations", validationMaps(validations));
 				}
-				catch (Exception e) {
-					update.put("updated", false);
-					update.put("error", e.getMessage() == null ? e.getClass().getName() : e.getMessage());
+				if (hasErrors(validations)) {
+					update.put("error", buildValidationMessage(validations));
+				}
+				else {
+					reloadArtifactAfterMcpUpdate(artifactId);
+					notifyCollaborationReload(artifactId);
+					successCount = 1;
 				}
 			}
-			updates.add(update);
+			catch (Exception e) {
+				update.put("error", e.getMessage() == null ? e.getClass().getName() : e.getMessage());
+			}
 		}
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("count", updates.size());
+		structuredContent.put("path", path);
+		structuredContent.put("matchCount", totalMatchCount);
+		structuredContent.put("original", before);
+		structuredContent.put("new", after);
+		structuredContent.put("diff", update.get("diff"));
+		structuredContent.put("count", 1);
 		structuredContent.put("updatedCount", successCount);
-		structuredContent.put("failedCount", updates.size() - successCount);
-		structuredContent.put("isError", successCount == 0);
-		structuredContent.put("preview", preview);
-		structuredContent.put("updates", updates);
-		if (operations.size() == 1) {
-			Map<String, Object> operation = operations.get(0);
-			structuredContent.put("path", operation.get("path"));
-			structuredContent.put("matchCount", operation.get("matchCount"));
-			structuredContent.put("original", operation.get("before"));
-			structuredContent.put("new", operation.get("after"));
-			structuredContent.put("diff", buildFallbackDiff(Arrays.asList(operation)));
+		structuredContent.put("failedCount", 1 - successCount);
+		structuredContent.put("updates", Arrays.asList(update));
+		String message = update.get("error") == null ? null : update.get("error").toString();
+		if (update.get("validations") != null) {
+			structuredContent.put("validations", update.get("validations"));
 		}
 		ensureStaticReviewResource();
-		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI);
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(successCount == 0), message);
 	}
 
 	private Map<String, Object> findArtifactFragments(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -1125,9 +1143,7 @@ public class MCPREST {
 			reloadArtifactAfterMcpUpdate(parent.getId());
 			notifyCollaborationReload(artifactId);
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-			structuredContent.put("isError", false);
 			structuredContent.put("code", "CREATED");
-			structuredContent.put("message", "Created artifact '" + artifactId + "'.");
 			structuredContent.put("artifactId", artifactId);
 			structuredContent.put("namespace", namespace);
 			structuredContent.put("name", name);
@@ -1167,9 +1183,7 @@ public class MCPREST {
 			reloadArtifactAfterMcpUpdate(newEntry.getId());
 			notifyCollaborationReload(newEntry.getId());
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-			structuredContent.put("isError", false);
 			structuredContent.put("code", "CREATED");
-			structuredContent.put("message", "Created project '" + newEntry.getId() + "'.");
 			structuredContent.put("projectId", newEntry.getId());
 			structuredContent.put("name", name);
 			structuredContent.put("type", projectType.name().toLowerCase());
@@ -1205,7 +1219,6 @@ public class MCPREST {
 			structuredContent.put("count", 0);
 			structuredContent.put("content", "");
 			structuredContent.put("code", "EMPTY_RANGE");
-			structuredContent.put("message", "startLine exceeds total lines");
 			return structuredContent;
 		}
 		int from = startLine - 1;
@@ -1267,24 +1280,18 @@ public class MCPREST {
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("path", path);
 			structuredContent.put("mode", mode);
-			structuredContent.put("preview", preview);
-			structuredContent.put("updated", false);
-			structuredContent.put("message", e.getMessage() == null ? e.getClass().getName() : e.getMessage());
-			structuredContent.put("isError", true);
+			String message = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
 			ensureStaticReviewResource();
-			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI);
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
 		}
 		Map<String, Object> update = new LinkedHashMap<String, Object>();
 		update.put("artifactId", artifactId);
 		update.put("path", path);
 		if (preview) {
-			update.put("updated", false);
-			update.put("preview", true);
 		}
 		else {
 			try {
 				List<Validation<?>> validations = currentManager.updateFragment(currentArtifact, path, before, after);
-				update.put("updated", !hasErrors(validations));
 				if (validations != null && !validations.isEmpty()) {
 					update.put("validations", validationMaps(validations));
 				}
@@ -1297,7 +1304,6 @@ public class MCPREST {
 				}
 			}
 			catch (Exception e) {
-				update.put("updated", false);
 				update.put("error", e.getMessage() == null ? e.getClass().getName() : e.getMessage());
 			}
 		}
@@ -1307,20 +1313,12 @@ public class MCPREST {
 		structuredContent.put("original", before);
 		structuredContent.put("new", after);
 		structuredContent.put("diff", buildFallbackDiff(Arrays.asList(operation)));
-		structuredContent.put("preview", preview);
-		structuredContent.put("updated", Boolean.TRUE.equals(update.get("updated")));
-		if (update.get("error") != null) {
-			structuredContent.put("message", update.get("error"));
-			structuredContent.put("isError", true);
-		}
-		else {
-			structuredContent.put("isError", false);
-		}
+		String message = update.get("error") == null ? null : update.get("error").toString();
 		if (update.get("validations") != null) {
 			structuredContent.put("validations", update.get("validations"));
 		}
 		ensureStaticReviewResource();
-		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI);
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(message != null), message);
 	}
 
 	private void reloadArtifactAfterMcpUpdate(String artifactId) {
@@ -1396,9 +1394,8 @@ public class MCPREST {
 	private String buildEditSummaryText(Map<String, Object> structuredContent) {
 		Object updatedCount = structuredContent.get("updatedCount");
 		Object failedCount = structuredContent.get("failedCount");
-		boolean preview = asBoolean(structuredContent.get("preview"));
 		StringBuilder builder = new StringBuilder();
-		builder.append(preview ? "Previewed " : "Updated ").append(updatedCount).append(" fragments, ").append(failedCount).append(" failed");
+		builder.append("Updated ").append(updatedCount).append(" fragments, ").append(failedCount).append(" failed");
 		@SuppressWarnings("unchecked")
 		List<Map<String, Object>> updates = (List<Map<String, Object>>) structuredContent.get("updates");
 		if (updates != null) {
@@ -1412,9 +1409,8 @@ public class MCPREST {
 	}
 
 	private String buildWriteSummaryText(Map<String, Object> structuredContent) {
-		boolean preview = asBoolean(structuredContent.get("preview"));
 		StringBuilder builder = new StringBuilder();
-		builder.append(preview ? "Previewed " : "Wrote ").append(structuredContent.get("path"));
+		builder.append("Wrote ").append(structuredContent.get("path"));
 		if (structuredContent.get("message") != null) {
 			builder.append("\n- ").append(structuredContent.get("message"));
 		}
@@ -1494,9 +1490,8 @@ public class MCPREST {
 		return "Loaded guidance for " + total + " skill" + (total == 1 ? "." : "s.");
 	}
 
-	private String buildInvokeDisplayMessage(Map<String, Object> structuredContent) {
+	private String buildInvokeDisplayMessage(boolean isError, Map<String, Object> structuredContent) {
 		String serviceId = string(structuredContent.get("serviceId"));
-		boolean isError = asBoolean(structuredContent.get("isError"));
 		return (isError ? "Service failed: " : "Service invoked: ") + serviceId;
 	}
 
@@ -1545,22 +1540,16 @@ public class MCPREST {
 	private String buildEditDisplayMessage(Map<String, Object> structuredContent) {
 		Object count = structuredContent.get("count");
 		String path = string(structuredContent.get("path"));
-		boolean preview = asBoolean(structuredContent.get("preview"));
 		if (path != null) {
-			return (preview ? "Prepared preview for " : "Updated ") + path + ".";
+			return "Updated " + path + ".";
 		}
-		return (preview ? "Prepared preview for " : "Updated ") + count + " artifact fragment" + ("1".equals(String.valueOf(count)) ? "." : "s.");
+		return "Updated " + count + " artifact fragment" + ("1".equals(String.valueOf(count)) ? "." : "s.");
 	}
 
 	private String buildWriteDisplayMessage(Map<String, Object> structuredContent) {
 		String path = string(structuredContent.get("path"));
-		boolean preview = asBoolean(structuredContent.get("preview"));
-		boolean updated = asBoolean(structuredContent.get("updated"));
 		boolean isError = asBoolean(structuredContent.get("isError"));
-		if (preview) {
-			return "Prepared preview for " + path + ".";
-		}
-		if (updated && !isError) {
+		if (!isError) {
 			return "Wrote " + path + ".";
 		}
 		return "Failed to write " + path + ".";
@@ -1909,7 +1898,7 @@ public class MCPREST {
 		if (reviewResources().containsKey(REVIEW_RESOURCE_URI)) {
 			return;
 		}
-		storeReviewResource(REVIEW_RESOURCE_URI, "diff.html", "text/html", loadReviewResourceBytes("diff.html"));
+		storeReviewResource(REVIEW_RESOURCE_URI, "diff.html", "text/html;profile=mcp-app", loadReviewResourceBytes("diff.html"));
 	}
 
 	private byte[] loadReviewResourceBytes(String name) {
@@ -2061,6 +2050,16 @@ public class MCPREST {
 		}
 	}
 
+	private Map<String, Object> buildToolDefinitionMeta(String resourceUri) {
+		Map<String, Object> meta = new LinkedHashMap<String, Object>();
+		if (resourceUri != null && !resourceUri.trim().isEmpty()) {
+			Map<String, Object> ui = new LinkedHashMap<String, Object>();
+			ui.put("resourceUri", resourceUri);
+			meta.put("ui", ui);
+		}
+		return meta.isEmpty() ? null : meta;
+	}
+
 	private Map<String, Object> buildToolMeta(String resourceUri) {
 		return buildToolMeta(resourceUri, null);
 	}
@@ -2089,14 +2088,14 @@ public class MCPREST {
 		String message = firstExceptionMessage(exception);
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 		structuredContent.put("tool", toolName);
-		structuredContent.put("isError", true);
-		structuredContent.put("message", message);
 		structuredContent.put("details", buildExceptionMessageChain(exception));
 		structuredContent.put("stacktrace", stacktrace(exception));
 		return new ToolResult(
 			structuredContent,
 			textContent("Tool call failed: " + message),
-			buildToolMeta(null, "Tool failed: " + toolName)
+			buildToolMeta(null, "Tool failed: " + toolName),
+			true,
+			message
 		);
 	}
 
@@ -2104,28 +2103,13 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("results", schema("array"));
-		structuredProperties.put("pattern", schema("string"));
-		structuredProperties.put("count", schema("integer"));
-		structuredProperties.put("totalResults", schema("integer"));
-		structuredProperties.put("totalMatches", schema("integer"));
-		structuredProperties.put("truncated", schema("boolean"));
-		structuredProperties.put("mode", schema("string"));
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("results", schema("array"));
+		properties.put("pattern", schema("string"));
+		properties.put("count", schema("integer"));
+		properties.put("totalResults", schema("integer"));
+		properties.put("totalMatches", schema("integer"));
+		properties.put("truncated", schema("boolean"));
+		properties.put("mode", schema("string"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2134,30 +2118,15 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> meta = new LinkedHashMap<String, Object>();
-		meta.put("type", "object");
-		Map<String, Object> metaProperties = new LinkedHashMap<String, Object>();
-		Map<String, Object> ui = new LinkedHashMap<String, Object>();
-		ui.put("type", "object");
-		Map<String, Object> uiProperties = new LinkedHashMap<String, Object>();
-		uiProperties.put("resourceUri", schema("string"));
-		ui.put("properties", uiProperties);
-		metaProperties.put("ui", ui);
-		meta.put("properties", metaProperties);
-		properties.put("_meta", meta);
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("path", schema("string"));
-		structuredProperties.put("matchCount", schema("integer"));
-		structuredProperties.put("original", schema("string"));
-		structuredProperties.put("new", schema("string"));
-		structuredProperties.put("diff", schema("string"));
-		structuredProperties.put("count", schema("integer"));
-		structuredProperties.put("updatedCount", schema("integer"));
-		structuredProperties.put("failedCount", schema("integer"));
-		structuredProperties.put("isError", schema("boolean"));
-		structuredProperties.put("preview", schema("boolean"));
+		properties.put("path", schema("string"));
+		properties.put("matchCount", schema("integer"));
+		properties.put("original", schema("string"));
+		properties.put("new", schema("string"));
+		properties.put("diff", schema("string"));
+		properties.put("count", schema("integer"));
+		properties.put("updatedCount", schema("integer"));
+		properties.put("failedCount", schema("integer"));
+		properties.put("validations", schema("array"));
 		Map<String, Object> updates = schema("array");
 		Map<String, Object> updateItem = new LinkedHashMap<String, Object>();
 		updateItem.put("type", "object");
@@ -2165,24 +2134,14 @@ public class MCPREST {
 		updateProperties.put("artifactId", schema("string"));
 		updateProperties.put("path", schema("string"));
 		updateProperties.put("matchCount", schema("integer"));
-		updateProperties.put("updated", schema("boolean"));
+		updateProperties.put("original", schema("string"));
+		updateProperties.put("new", schema("string"));
+		updateProperties.put("diff", schema("string"));
 		updateProperties.put("error", schema("string"));
 		updateProperties.put("validations", schema("array"));
 		updateItem.put("properties", updateProperties);
 		updates.put("items", updateItem);
-		structuredProperties.put("updates", updates);
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("updates", updates);
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2191,27 +2150,12 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("files", schema("array"));
-		structuredProperties.put("count", schema("integer"));
-		structuredProperties.put("total", schema("integer"));
-		structuredProperties.put("limit", schema("integer"));
-		structuredProperties.put("offset", schema("integer"));
-		structuredProperties.put("truncated", schema("boolean"));
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("files", schema("array"));
+		properties.put("count", schema("integer"));
+		properties.put("total", schema("integer"));
+		properties.put("limit", schema("integer"));
+		properties.put("offset", schema("integer"));
+		properties.put("truncated", schema("boolean"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2220,29 +2164,13 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("artifactId", schema("string"));
-		structuredProperties.put("path", schema("string"));
-		structuredProperties.put("startLine", schema("integer"));
-		structuredProperties.put("count", schema("integer"));
-		structuredProperties.put("total", schema("integer"));
-		structuredProperties.put("content", schema("string"));
-		structuredProperties.put("code", schema("string"));
-		structuredProperties.put("message", schema("string"));
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("artifactId", schema("string"));
+		properties.put("path", schema("string"));
+		properties.put("startLine", schema("integer"));
+		properties.put("count", schema("integer"));
+		properties.put("total", schema("integer"));
+		properties.put("content", schema("string"));
+		properties.put("code", schema("string"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2251,29 +2179,13 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("serviceId", schema("string"));
-		structuredProperties.put("started", schema("string"));
-		structuredProperties.put("stopped", schema("string"));
-		structuredProperties.put("trace", schema("boolean"));
-		structuredProperties.put("traceId", schema("string"));
-		structuredProperties.put("isError", schema("boolean"));
-		structuredProperties.put("exception", schema("string"));
-		structuredProperties.put("output", new LinkedHashMap<String, Object>());
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("serviceId", schema("string"));
+		properties.put("started", schema("string"));
+		properties.put("stopped", schema("string"));
+		properties.put("trace", schema("boolean"));
+		properties.put("traceId", schema("string"));
+		properties.put("exception", schema("string"));
+		properties.put("output", new LinkedHashMap<String, Object>());
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2282,25 +2194,10 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("traceId", schema("string"));
-		structuredProperties.put("count", schema("integer"));
-		structuredProperties.put("truncated", schema("boolean"));
-		structuredProperties.put("matches", schema("array"));
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("traceId", schema("string"));
+		properties.put("count", schema("integer"));
+		properties.put("truncated", schema("boolean"));
+		properties.put("matches", schema("array"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2309,42 +2206,14 @@ public class MCPREST {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		Map<String, Object> meta = new LinkedHashMap<String, Object>();
-		meta.put("type", "object");
-		Map<String, Object> metaProperties = new LinkedHashMap<String, Object>();
-		Map<String, Object> ui = new LinkedHashMap<String, Object>();
-		ui.put("type", "object");
-		Map<String, Object> uiProperties = new LinkedHashMap<String, Object>();
-		uiProperties.put("resourceUri", schema("string"));
-		ui.put("properties", uiProperties);
-		metaProperties.put("ui", ui);
-		meta.put("properties", metaProperties);
-		properties.put("_meta", meta);
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("type", "object");
-		Map<String, Object> structuredProperties = new LinkedHashMap<String, Object>();
-		structuredProperties.put("path", schema("string"));
-		structuredProperties.put("mode", schema("string"));
-		structuredProperties.put("original", schema("string"));
-		structuredProperties.put("new", schema("string"));
-		structuredProperties.put("diff", schema("string"));
-		structuredProperties.put("preview", schema("boolean"));
-		structuredProperties.put("updated", schema("boolean"));
-		structuredProperties.put("isError", schema("boolean"));
-		structuredProperties.put("message", schema("string"));
-		structuredProperties.put("validations", schema("array"));
-		structuredContent.put("properties", structuredProperties);
-		properties.put("structuredContent", structuredContent);
-		Map<String, Object> content = schema("array");
-		Map<String, Object> contentItems = new LinkedHashMap<String, Object>();
-		contentItems.put("type", "object");
-		Map<String, Object> contentProperties = new LinkedHashMap<String, Object>();
-		contentProperties.put("type", schema("string"));
-		contentProperties.put("text", schema("string"));
-		contentItems.put("properties", contentProperties);
-		contentItems.put("required", Arrays.asList("type", "text"));
-		content.put("items", contentItems);
-		properties.put("content", content);
+		properties.put("path", schema("string"));
+		properties.put("mode", schema("string"));
+		properties.put("original", schema("string"));
+		properties.put("new", schema("string"));
+		properties.put("diff", schema("string"));
+		properties.put("preview", schema("boolean"));
+		properties.put("updated", schema("boolean"));
+		properties.put("validations", schema("array"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2352,16 +2221,14 @@ public class MCPREST {
 	private Map<String, Object> editSchema() {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "array");
-		schema.put("description", "List of exact find/replace edits to apply in order. Always use leading tabs instead of leading spaces in replacement content.");
+		schema.put("description", "List of exact find/replace edits to apply in order to a single artifact fragment. Each edit matches against the fragment state produced by the previous edit. Always use leading tabs instead of leading spaces in replacement content.");
 		Map<String, Object> items = new LinkedHashMap<String, Object>();
 		items.put("type", "object");
 		Map<String, Object> properties = new LinkedHashMap<String, Object>();
-		properties.put("artifactId", propertySchema("string", "Artifact id containing the fragment."));
-		properties.put("path", propertySchema("string", "Path to the fragment inside the artifact."));
-		properties.put("find", propertySchema("string", "Exact text to find (must match exactly once)."));
+		properties.put("find", propertySchema("string", "Exact text to find in the current fragment state (must match exactly once)."));
 		properties.put("replace", propertySchema("string", "Replacement text."));
 		items.put("properties", properties);
-		items.put("required", Arrays.asList("artifactId", "path", "find", "replace"));
+		items.put("required", Arrays.asList("find", "replace"));
 		schema.put("items", items);
 		return schema;
 	}
@@ -2625,7 +2492,7 @@ public class MCPREST {
 		}
 	}
 
-	private List<Map<String, String>> extractEdits(Map<String, Object> arguments) {
+	private List<Map<String, String>> extractEdits(Map<String, Object> arguments, String defaultArtifactId, String defaultPath) {
 		if (arguments == null || !arguments.containsKey("edits")) {
 			throw protocolError("MISSING_EDITS", "Missing required argument 'edits'.");
 		}
@@ -2643,8 +2510,20 @@ public class MCPREST {
 				throw protocolError("INVALID_EDITS", "Entry " + i + " in 'edits' must be an object.");
 			}
 			Map<String, Object> edit = map(values.get(i));
-			String artifactId = requiredString(edit, "artifactId", "MISSING_ARTIFACT_ID");
-			String path = requiredString(edit, "path", "MISSING_PATH");
+			String artifactId = string(edit.get("artifactId"));
+			if (artifactId == null) {
+				artifactId = defaultArtifactId;
+			}
+			if (artifactId == null) {
+				throw protocolError("MISSING_ARTIFACT_ID", "Missing required argument 'artifactId'.");
+			}
+			String path = string(edit.get("path"));
+			if (path == null) {
+				path = defaultPath;
+			}
+			if (path == null) {
+				throw protocolError("MISSING_PATH", "Missing required argument 'path'.");
+			}
 			String find = requiredString(edit, "find", "MISSING_FIND");
 			String replace = requiredString(edit, "replace", "MISSING_REPLACE");
 			if (find.isEmpty()) {
@@ -3156,7 +3035,7 @@ public class MCPREST {
 				binding.setAllowXSI(false);
 				binding.setNamespaceAware(false);
 				ByteArrayOutputStream output = new ByteArrayOutputStream();
-				binding.marshal(output, content);
+				binding.marshal(output, new StreamHiderContent(content));
 				return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
 			}
 			catch (Exception e) {
