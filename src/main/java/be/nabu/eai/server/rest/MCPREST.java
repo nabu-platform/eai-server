@@ -841,12 +841,15 @@ public class MCPREST {
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private CreatableArtifactFragmentManager<?> findCreatableFragmentManagerByArtifactType(String artifactType) {
-		for (Class<CreatableArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), CreatableArtifactFragmentManager.class, false)) {
+		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
 			try {
-				CreatableArtifactFragmentManager manager = managerClass.newInstance();
+				ArtifactFragmentManager manager = managerClass.newInstance();
+				if (!(manager instanceof CreatableArtifactFragmentManager)) {
+					continue;
+				}
 				String managerArtifactType = artifactTypeForManager(manager);
 				if (artifactType.equals(managerArtifactType)) {
-					return manager;
+					return (CreatableArtifactFragmentManager<?>) manager;
 				}
 			}
 			catch (Exception e) {
@@ -876,6 +879,8 @@ public class MCPREST {
 	private Map<String, Object> createErrorResult(String code, String message) {
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 		structuredContent.put("code", code);
+		structuredContent.put("isError", true);
+		structuredContent.put("message", message);
 		return structuredContent;
 	}
 
@@ -1060,11 +1065,16 @@ public class MCPREST {
 		structuredContent.put("failedCount", 1 - successCount);
 		structuredContent.put("updates", Arrays.asList(update));
 		String message = update.get("error") == null ? null : update.get("error").toString();
+		boolean isError = successCount == 0;
+		structuredContent.put("isError", isError);
+		if (message != null) {
+			structuredContent.put("message", message);
+		}
 		if (update.get("validations") != null) {
 			structuredContent.put("validations", update.get("validations"));
 		}
 		ensureStaticReviewResource();
-		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(successCount == 0), message);
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(isError), message);
 	}
 
 	private Map<String, Object> findArtifactFragments(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -1280,7 +1290,9 @@ public class MCPREST {
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("path", path);
 			structuredContent.put("mode", mode);
+			structuredContent.put("isError", true);
 			String message = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
+			structuredContent.put("message", message);
 			ensureStaticReviewResource();
 			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
 		}
@@ -1314,11 +1326,16 @@ public class MCPREST {
 		structuredContent.put("new", after);
 		structuredContent.put("diff", buildFallbackDiff(Arrays.asList(operation)));
 		String message = update.get("error") == null ? null : update.get("error").toString();
+		boolean isError = message != null;
+		structuredContent.put("isError", isError);
+		if (message != null) {
+			structuredContent.put("message", message);
+		}
 		if (update.get("validations") != null) {
 			structuredContent.put("validations", update.get("validations"));
 		}
 		ensureStaticReviewResource();
-		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(message != null), message);
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(isError), message);
 	}
 
 	private void reloadArtifactAfterMcpUpdate(String artifactId) {
@@ -1410,7 +1427,8 @@ public class MCPREST {
 
 	private String buildWriteSummaryText(Map<String, Object> structuredContent) {
 		StringBuilder builder = new StringBuilder();
-		builder.append("Wrote ").append(structuredContent.get("path"));
+		boolean isError = asBoolean(structuredContent.get("isError"));
+		builder.append(isError ? "Failed to write " : "Wrote ").append(structuredContent.get("path"));
 		if (structuredContent.get("message") != null) {
 			builder.append("\n- ").append(structuredContent.get("message"));
 		}
@@ -1540,10 +1558,11 @@ public class MCPREST {
 	private String buildEditDisplayMessage(Map<String, Object> structuredContent) {
 		Object count = structuredContent.get("count");
 		String path = string(structuredContent.get("path"));
+		boolean isError = asBoolean(structuredContent.get("isError"));
 		if (path != null) {
-			return "Updated " + path + ".";
+			return isError ? "Failed to update " + path + "." : "Updated " + path + ".";
 		}
-		return "Updated " + count + " artifact fragment" + ("1".equals(String.valueOf(count)) ? "." : "s.");
+		return (isError ? "Failed to update " : "Updated ") + count + " artifact fragment" + ("1".equals(String.valueOf(count)) ? "." : "s.");
 	}
 
 	private String buildWriteDisplayMessage(Map<String, Object> structuredContent) {

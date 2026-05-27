@@ -1367,22 +1367,33 @@ table.diff.diff-layout-unified td.code {
 				}
 				if (window.App) {
 					try {
-						var app = new window.App();
+						var app = new window.App({
+							name: "nabu-diff",
+							version: "1.0.0"
+						});
 						app.ontoolresult = applyResult;
 						if (typeof app.connect === "function") {
-							app.connect().catch(function () {});
+							app.connect().catch(function (e) {
+								console.error("Failed to connect MCP App", e);
+							});
 						}
 					}
-					catch (e) {}
+					catch (e) {
+						console.error("Failed to initialize MCP App", e);
+					}
 				}
 				if (window.mcp) {
 					try {
 						window.mcp.ontoolresult = applyResult;
 						if (typeof window.mcp.connect === "function") {
-							window.mcp.connect().catch(function () {});
+							window.mcp.connect().catch(function (e) {
+								console.error("Failed to connect MCP bridge", e);
+							});
 						}
 					}
-					catch (e) {}
+					catch (e) {
+						console.error("Failed to initialize MCP bridge", e);
+					}
 				}
 				applyFallback();
 			})();
