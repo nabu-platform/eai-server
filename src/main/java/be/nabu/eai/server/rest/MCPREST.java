@@ -37,6 +37,7 @@ import be.nabu.eai.repository.EAIRepositoryUtils;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.ArtifactFragmentManager;
 import be.nabu.eai.repository.api.CreatableArtifactFragmentManager;
+import be.nabu.eai.repository.api.DynamicArtifactFragmentManager;
 import be.nabu.eai.repository.api.Entry;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager.ReviewResource;
@@ -131,8 +132,11 @@ public class MCPREST {
 	private static final String SEARCH_TOOL_NAME = "search_nabu_artifact_fragments";
 	private static final String FIND_TOOL_NAME = "find_nabu_artifact_fragment";
 	private static final String READ_TOOL_NAME = "read_nabu_artifact_fragment";
+	private static final String READ_MULTIPLE_TOOL_NAME = "read_multiple_nabu_artifact_fragments";
 	private static final String EDIT_TOOL_NAME = "edit_nabu_artifact_fragment";
 	private static final String WRITE_TOOL_NAME = "write_nabu_artifact_fragment";
+	private static final String CREATE_FRAGMENT_TOOL_NAME = "create_nabu_artifact_fragment";
+	private static final String DELETE_FRAGMENT_TOOL_NAME = "delete_nabu_artifact_fragment";
 	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
 	private static final String CREATE_PROJECT_TOOL_NAME = "create_nabu_project";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
@@ -143,6 +147,8 @@ public class MCPREST {
 	private static final String REVIEW_RESOURCE_MAP = "mcp.rest.review.resources";
 	private static final String REVIEW_RESOURCE_URI = "ui://nabu/review/diff.html";
 	private static final int MAX_RESULT_BYTES = 32000;
+	private static final int MAX_MULTI_READ_FRAGMENTS = 20;
+	private static final int MAX_MULTI_READ_BYTES = 64000;
 	private static final int SUMMARY_TOP = 20;
 	private static final long SESSION_TIMEOUT = 24L * 60L * 60L * 1000L;
 	private static final DateTimeFormatter TRACE_TIME_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC);
@@ -313,6 +319,35 @@ public class MCPREST {
 			readTool.put("inputSchema", readInputSchema);
 			readTool.put("outputSchema", readOutputSchema());
 			tools.add(readTool);
+			Map<String, Object> readMultipleTool = new LinkedHashMap<String, Object>();
+			readMultipleTool.put("name", READ_MULTIPLE_TOOL_NAME);
+			readMultipleTool.put("title", "Read multiple nabu artifact fragments");
+			readMultipleTool.put("description", "Read lines from multiple indexed nabu artifact fragments in one call. Results may be truncated to avoid excessive output.");
+			Map<String, Object> readMultipleAnnotations = new LinkedHashMap<String, Object>();
+			readMultipleAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
+			readMultipleAnnotations.put("intentTemplate", "Read multiple artifact fragments");
+			readMultipleTool.put("annotations", readMultipleAnnotations);
+			Map<String, Object> readMultipleInputSchema = new LinkedHashMap<String, Object>();
+			readMultipleInputSchema.put("type", "object");
+			Map<String, Object> readMultipleProperties = new LinkedHashMap<String, Object>();
+			Map<String, Object> fragments = schema("array");
+			fragments.put("description", "Fragments to read. Keep this list small to avoid large responses.");
+			Map<String, Object> fragmentItem = new LinkedHashMap<String, Object>();
+			fragmentItem.put("type", "object");
+			Map<String, Object> fragmentProperties = new LinkedHashMap<String, Object>();
+			fragmentProperties.put("artifactId", propertySchema("string", "Artifact id containing the fragment."));
+			fragmentProperties.put("path", propertySchema("string", "Path to the fragment inside the artifact."));
+			fragmentProperties.put("startLine", propertySchema("integer", "1-based line number to start reading from. Default: 1."));
+			fragmentProperties.put("limit", propertySchema("integer", "Maximum number of lines to return (>0). Default: 200."));
+			fragmentItem.put("properties", fragmentProperties);
+			fragmentItem.put("required", Arrays.asList("artifactId", "path"));
+			fragments.put("items", fragmentItem);
+			readMultipleProperties.put("fragments", fragments);
+			readMultipleInputSchema.put("properties", readMultipleProperties);
+			readMultipleInputSchema.put("required", Arrays.asList("fragments"));
+			readMultipleTool.put("inputSchema", readMultipleInputSchema);
+			readMultipleTool.put("outputSchema", readMultipleOutputSchema());
+			tools.add(readMultipleTool);
 			Map<String, Object> editTool = new LinkedHashMap<String, Object>();
 			editTool.put("name", EDIT_TOOL_NAME);
 			editTool.put("title", "Edit nabu artifact fragment");
@@ -358,6 +393,48 @@ public class MCPREST {
 			writeTool.put("outputSchema", writeOutputSchema());
 			writeTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
 			tools.add(writeTool);
+			List<String> dynamicArtifactTypes = listDynamicArtifactTypes();
+			if (!dynamicArtifactTypes.isEmpty()) {
+				Map<String, Object> createFragmentTool = new LinkedHashMap<String, Object>();
+				createFragmentTool.put("name", CREATE_FRAGMENT_TOOL_NAME);
+				createFragmentTool.put("title", "Create nabu artifact fragment");
+				createFragmentTool.put("description", buildCreateFragmentToolDescription(dynamicArtifactTypes));
+				Map<String, Object> createFragmentAnnotations = new LinkedHashMap<String, Object>();
+				createFragmentAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+				createFragmentAnnotations.put("intentTemplate", "Create artifact fragment {path} in {artifactId}");
+				createFragmentTool.put("annotations", createFragmentAnnotations);
+				Map<String, Object> createFragmentInputSchema = new LinkedHashMap<String, Object>();
+				createFragmentInputSchema.put("type", "object");
+				Map<String, Object> createFragmentProperties = new LinkedHashMap<String, Object>();
+				createFragmentProperties.put("artifactId", propertySchema("string", "Artifact id containing the fragment."));
+				createFragmentProperties.put("path", propertySchema("string", "Path to create inside the artifact."));
+				createFragmentProperties.put("content", propertySchema("string", "Optional initial fragment content. Defaults to empty content when omitted."));
+				createFragmentInputSchema.put("properties", createFragmentProperties);
+				createFragmentInputSchema.put("required", Arrays.asList("artifactId", "path"));
+				createFragmentTool.put("inputSchema", createFragmentInputSchema);
+				createFragmentTool.put("outputSchema", writeOutputSchema());
+				createFragmentTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
+				tools.add(createFragmentTool);
+				Map<String, Object> deleteFragmentTool = new LinkedHashMap<String, Object>();
+				deleteFragmentTool.put("name", DELETE_FRAGMENT_TOOL_NAME);
+				deleteFragmentTool.put("title", "Delete nabu artifact fragment");
+				deleteFragmentTool.put("description", buildDeleteFragmentToolDescription(dynamicArtifactTypes));
+				Map<String, Object> deleteFragmentAnnotations = new LinkedHashMap<String, Object>();
+				deleteFragmentAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+				deleteFragmentAnnotations.put("intentTemplate", "Delete artifact fragment {path} from {artifactId}");
+				deleteFragmentTool.put("annotations", deleteFragmentAnnotations);
+				Map<String, Object> deleteFragmentInputSchema = new LinkedHashMap<String, Object>();
+				deleteFragmentInputSchema.put("type", "object");
+				Map<String, Object> deleteFragmentProperties = new LinkedHashMap<String, Object>();
+				deleteFragmentProperties.put("artifactId", propertySchema("string", "Artifact id containing the fragment."));
+				deleteFragmentProperties.put("path", propertySchema("string", "Path to delete inside the artifact."));
+				deleteFragmentInputSchema.put("properties", deleteFragmentProperties);
+				deleteFragmentInputSchema.put("required", Arrays.asList("artifactId", "path"));
+				deleteFragmentTool.put("inputSchema", deleteFragmentInputSchema);
+				deleteFragmentTool.put("outputSchema", writeOutputSchema());
+				deleteFragmentTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
+				tools.add(deleteFragmentTool);
+			}
 			List<String> creatableArtifactTypes = listCreatableArtifactTypes();
 			if (!creatableArtifactTypes.isEmpty()) {
 				Map<String, Object> createTool = new LinkedHashMap<String, Object>();
@@ -481,7 +558,7 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !CREATE_PROJECT_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
+			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !READ_MULTIPLE_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_FRAGMENT_TOOL_NAME.equals(name) && !DELETE_FRAGMENT_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !CREATE_PROJECT_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
@@ -498,6 +575,15 @@ public class MCPREST {
 				}
 				else if (READ_TOOL_NAME.equals(name)) {
 					toolResult = readToolResult(arguments, meta, configuration);
+				}
+				else if (READ_MULTIPLE_TOOL_NAME.equals(name)) {
+					toolResult = readMultipleToolResult(arguments, meta, configuration);
+				}
+				else if (CREATE_FRAGMENT_TOOL_NAME.equals(name)) {
+					toolResult = createFragmentToolResult(arguments, meta, configuration);
+				}
+				else if (DELETE_FRAGMENT_TOOL_NAME.equals(name)) {
+					toolResult = deleteFragmentToolResult(arguments, meta, configuration);
 				}
 				else if (CREATE_TOOL_NAME.equals(name)) {
 					toolResult = createToolResult(arguments, meta, configuration);
@@ -714,6 +800,26 @@ public class MCPREST {
 	}
 
 	@SuppressWarnings({ "rawtypes" })
+	private List<String> listDynamicArtifactTypes() {
+		Set<String> artifactTypes = new LinkedHashSet<String>();
+		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
+			try {
+				ArtifactFragmentManager manager = managerClass.newInstance();
+				if (manager instanceof DynamicArtifactFragmentManager) {
+					String artifactType = artifactTypeForManager(manager);
+					if (artifactType != null) {
+						artifactTypes.add(artifactType);
+					}
+				}
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
+		return new ArrayList<String>(artifactTypes);
+	}
+
+	@SuppressWarnings({ "rawtypes" })
 	private List<String> listCreatableArtifactTypes() {
 		Set<String> artifactTypes = new LinkedHashSet<String>();
 		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
@@ -839,6 +945,34 @@ public class MCPREST {
 		return "Additional trace provider guidance:\n\n" + String.join("\n\n", guidelines);
 	}
 
+	private String buildCreateFragmentToolDescription(List<String> dynamicArtifactTypes) {
+		return "Create a new artifact fragment inside an existing artifact. This tool can ONLY be used for the following artifact types: " + String.join(", ", dynamicArtifactTypes) + ". Do NOT use this tool for any other artifact type.";
+	}
+
+	private String buildDeleteFragmentToolDescription(List<String> dynamicArtifactTypes) {
+		return "Delete an existing artifact fragment inside an existing artifact. This tool can ONLY be used for the following artifact types: " + String.join(", ", dynamicArtifactTypes) + ". Do NOT use this tool for any other artifact type.";
+	}
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private DynamicArtifactFragmentManager<?> findDynamicFragmentManagerByArtifactType(String artifactType) {
+		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
+			try {
+				ArtifactFragmentManager manager = managerClass.newInstance();
+				if (!(manager instanceof DynamicArtifactFragmentManager)) {
+					continue;
+				}
+				String managerArtifactType = artifactTypeForManager(manager);
+				if (artifactType.equals(managerArtifactType)) {
+					return (DynamicArtifactFragmentManager<?>) manager;
+				}
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
+		return null;
+	}
+
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private CreatableArtifactFragmentManager<?> findCreatableFragmentManagerByArtifactType(String artifactType) {
 		for (Class<ArtifactFragmentManager> managerClass : EAIRepositoryUtils.getImplementationsFor(server.getRepository().getClassLoader(), ArtifactFragmentManager.class, false)) {
@@ -956,6 +1090,26 @@ public class MCPREST {
 		Map<String, Object> structuredContent = readArtifact(arguments, meta, configuration);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildReadDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult readMultipleToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		Map<String, Object> structuredContent = readMultipleArtifacts(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildReadMultipleDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult createFragmentToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		EditArtifactResult createResult = createArtifactFragment(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(buildWriteSummaryText(createResult.structuredContent));
+		Map<String, Object> toolMeta = buildToolMeta(createResult.resourceUri, buildWriteDisplayMessage(createResult.structuredContent));
+		return new ToolResult(createResult.structuredContent, content, toolMeta, createResult.isError, createResult.message);
+	}
+
+	private ToolResult deleteFragmentToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		EditArtifactResult deleteResult = deleteArtifactFragment(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(buildWriteSummaryText(deleteResult.structuredContent));
+		Map<String, Object> toolMeta = buildToolMeta(deleteResult.resourceUri, buildWriteDisplayMessage(deleteResult.structuredContent));
+		return new ToolResult(deleteResult.structuredContent, content, toolMeta, deleteResult.isError, deleteResult.message);
 	}
 
 	private ToolResult createToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -1095,7 +1249,7 @@ public class MCPREST {
 		}
 		List<FragmentSearch> fragments = server.getFragmentIndexService() == null
 			? Collections.<FragmentSearch>emptyList()
-			: server.getFragmentIndexService().search(".*", null, namespaces, artifactTypes, artifactCategories, caseSensitive, 0, 0, 0);
+			: server.getFragmentIndexService().list(null, namespaces, artifactTypes, artifactCategories);
 		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId != null && !artifactId.equals(fragment.getArtifactId())) {
@@ -1206,6 +1360,46 @@ public class MCPREST {
 
 	private Map<String, Object> readArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		return readArtifact(arguments, namespaces);
+	}
+
+	private Map<String, Object> readMultipleArtifacts(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		List<Object> fragments = list(arguments.get("fragments"));
+		if (fragments == null || fragments.isEmpty()) {
+			throw protocolError("MISSING_FRAGMENTS", "Argument 'fragments' must contain at least one fragment request.");
+		}
+		if (fragments.size() > MAX_MULTI_READ_FRAGMENTS) {
+			throw protocolError("TOO_MANY_FRAGMENTS", "Argument 'fragments' may contain at most " + MAX_MULTI_READ_FRAGMENTS + " fragment requests.");
+		}
+		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+		int totalBytes = 0;
+		boolean truncated = false;
+		for (Object object : fragments) {
+			Map<String, Object> fragment = map(object);
+			if (fragment == null) {
+				throw protocolError("INVALID_FRAGMENT", "Each entry in 'fragments' must be an object.");
+			}
+			Map<String, Object> result = readArtifact(fragment, namespaces);
+			String fragmentContent = string(result.get("content"));
+			int fragmentBytes = fragmentContent == null ? 0 : fragmentContent.getBytes(StandardCharsets.UTF_8).length;
+			if (!results.isEmpty() && totalBytes + fragmentBytes > MAX_MULTI_READ_BYTES) {
+				truncated = true;
+				break;
+			}
+			results.add(result);
+			totalBytes += fragmentBytes;
+		}
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("fragments", results);
+		structuredContent.put("count", results.size());
+		structuredContent.put("totalRequested", fragments.size());
+		structuredContent.put("truncated", truncated);
+		structuredContent.put("totalBytes", totalBytes);
+		return structuredContent;
+	}
+
+	private Map<String, Object> readArtifact(Map<String, Object> arguments, List<String> namespaces) {
 		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
 		String path = requiredString(arguments, "path", "MISSING_PATH");
 		int startLine = integer(arguments.get("startLine"), 1);
@@ -1243,6 +1437,117 @@ public class MCPREST {
 		structuredContent.put("count", to - from);
 		structuredContent.put("content", builder.toString());
 		return structuredContent;
+	}
+
+	@SuppressWarnings("unchecked")
+	private EditArtifactResult createArtifactFragment(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		String content = string(arguments.get("content"));
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("artifactId", artifactId);
+		structuredContent.put("path", path);
+		if (!isAllowedNamespace(artifactId, namespaces)) {
+			String message = "Artifact '" + artifactId + "' is outside the allowed namespaces.";
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
+		Node currentNode = server.getRepository().getNode(artifactId);
+		if (currentNode == null) {
+			String message = "Artifact not found: '" + artifactId + "'.";
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
+		try {
+			Artifact currentArtifact = (Artifact) currentNode.getArtifact();
+			ArtifactFragmentManager<Artifact> currentManager = EAIRepositoryUtils.getArtifactFragmentManager(currentArtifact);
+			if (currentManager == null) {
+				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support fragment access.");
+			}
+			String artifactType = artifactTypeForManager(currentManager);
+			DynamicArtifactFragmentManager<Artifact> dynamicManager = (DynamicArtifactFragmentManager<Artifact>) findDynamicFragmentManagerByArtifactType(artifactType);
+			if (dynamicManager == null) {
+				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support dynamic fragment creation.");
+			}
+			List<Validation<?>> validations = dynamicManager.createFragment(currentArtifact, path, content);
+			reloadArtifactAfterMcpUpdate(artifactId);
+			notifyCollaborationReload(artifactId);
+			boolean isError = hasErrors(validations);
+			String message = buildValidationMessage(validations);
+			structuredContent.put("code", isError ? "CREATE_FAILED" : "CREATED");
+			structuredContent.put("isError", isError);
+			structuredContent.put("message", validations == null || validations.isEmpty() ? (isError ? "Failed to create fragment." : "Created fragment '" + path + "'.") : message);
+			structuredContent.put("validations", validationMaps(validations == null ? Collections.<Validation<?>>emptyList() : validations));
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(isError), string(structuredContent.get("message")));
+		}
+		catch (Exception e) {
+			String message = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private EditArtifactResult deleteArtifactFragment(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("artifactId", artifactId);
+		structuredContent.put("path", path);
+		if (!isAllowedNamespace(artifactId, namespaces)) {
+			String message = "Artifact '" + artifactId + "' is outside the allowed namespaces.";
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
+		Node currentNode = server.getRepository().getNode(artifactId);
+		if (currentNode == null) {
+			String message = "Artifact not found: '" + artifactId + "'.";
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
+		try {
+			Artifact currentArtifact = (Artifact) currentNode.getArtifact();
+			ArtifactFragmentManager<Artifact> currentManager = EAIRepositoryUtils.getArtifactFragmentManager(currentArtifact);
+			if (currentManager == null) {
+				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support fragment access.");
+			}
+			String artifactType = artifactTypeForManager(currentManager);
+			DynamicArtifactFragmentManager<Artifact> dynamicManager = (DynamicArtifactFragmentManager<Artifact>) findDynamicFragmentManagerByArtifactType(artifactType);
+			if (dynamicManager == null) {
+				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support dynamic fragment deletion.");
+			}
+			List<Validation<?>> validations = dynamicManager.deleteFragment(currentArtifact, path);
+			reloadArtifactAfterMcpUpdate(artifactId);
+			notifyCollaborationReload(artifactId);
+			boolean isError = hasErrors(validations);
+			String message = buildValidationMessage(validations);
+			structuredContent.put("code", isError ? "DELETE_FAILED" : "DELETED");
+			structuredContent.put("isError", isError);
+			structuredContent.put("message", validations == null || validations.isEmpty() ? (isError ? "Failed to delete fragment." : "Deleted fragment '" + path + "'.") : message);
+			structuredContent.put("validations", validationMaps(validations == null ? Collections.<Validation<?>>emptyList() : validations));
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(isError), string(structuredContent.get("message")));
+		}
+		catch (Exception e) {
+			String message = e.getMessage() == null ? e.getClass().getName() : e.getMessage();
+			structuredContent.put("isError", true);
+			structuredContent.put("message", message);
+			ensureStaticReviewResource();
+			return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, true, message);
+		}
 	}
 
 	private EditArtifactResult writeArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) {
@@ -1535,6 +1840,12 @@ public class MCPREST {
 			return "No lines available in " + path + " for artifact " + artifactId + ".";
 		}
 		return "Read " + path + " from artifact " + artifactId + ".";
+	}
+
+	private String buildReadMultipleDisplayMessage(Map<String, Object> structuredContent) {
+		int count = integer(structuredContent.get("count"), 0);
+		boolean truncated = asBoolean(structuredContent.get("truncated"));
+		return "Read " + count + " artifact fragment" + (count == 1 ? "" : "s") + (truncated ? " (truncated)." : ".");
 	}
 
 	private String buildCreateDisplayMessage(Map<String, Object> structuredContent) {
@@ -1908,6 +2219,12 @@ public class MCPREST {
 		return unwrap instanceof Map ? (Map<String, Object>) unwrap : null;
 	}
 
+	@SuppressWarnings("unchecked")
+	private List<Object> list(Object object) {
+		Object unwrap = unwrap(object);
+		return unwrap instanceof List ? (List<Object>) unwrap : null;
+	}
+
 	private String string(Object object) {
 		Object unwrap = unwrap(object);
 		return unwrap == null ? null : unwrap.toString();
@@ -2190,6 +2507,21 @@ public class MCPREST {
 		properties.put("total", schema("integer"));
 		properties.put("content", schema("string"));
 		properties.put("code", schema("string"));
+		schema.put("properties", properties);
+		return schema;
+	}
+
+	private Map<String, Object> readMultipleOutputSchema() {
+		Map<String, Object> schema = new LinkedHashMap<String, Object>();
+		schema.put("type", "object");
+		Map<String, Object> properties = new LinkedHashMap<String, Object>();
+		Map<String, Object> fragments = schema("array");
+		fragments.put("items", readOutputSchema());
+		properties.put("fragments", fragments);
+		properties.put("count", schema("integer"));
+		properties.put("totalRequested", schema("integer"));
+		properties.put("totalBytes", schema("integer"));
+		properties.put("truncated", schema("boolean"));
 		schema.put("properties", properties);
 		return schema;
 	}
@@ -2678,8 +3010,7 @@ public class MCPREST {
 		if (service == null) {
 			throw new HTTPException(503, "The fragment index service is unavailable.");
 		}
-		List<String> globs = Arrays.asList(path);
-		List<FragmentSearch> fragments = service.search(".*", globs, namespaces, null, null, true, 0, 0, 0);
+		List<FragmentSearch> fragments = service.list(null, namespaces, null, null);
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId.equals(fragment.getArtifactId()) && path.equals(fragment.getPath())) {
 				return fragment;

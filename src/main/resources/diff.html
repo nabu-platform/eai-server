@@ -154,6 +154,21 @@ table.diff.diff-layout-unified td.code {
 	padding: 0.125rem 0.5rem;
 }
 
+.loading-shell {
+	display: none;
+	padding: 1rem 0;
+	color: var(--color-text-secondary, #4b4a44);
+	font-size: 0.875rem;
+}
+
+body[data-state='loading'] .loading-shell {
+	display: block;
+}
+
+body[data-state='loading'] #diff-table {
+	display: none;
+}
+
 table.diff.diff-layout-split pre {
 	line-height: 1.25;
 }
@@ -313,7 +328,8 @@ table.diff.diff-layout-unified td.code {
 
 		</style>
 	</head>
-	<body data-view="unified">
+	<body data-view="unified" data-state="idle">
+		<div class="loading-shell" id="loading-shell">Loading diff...</div>
 		<table class="diff diff-layout-unified" id="diff-table">
 			<thead class="diff-head-unified">
 				<tr>
@@ -1162,10 +1178,6 @@ table.diff.diff-layout-unified td.code {
 					document.querySelectorAll("button.toggle").forEach(function (btn) {
 						btn.classList.toggle("active", btn.getAttribute("data-view") === view);
 					});
-					try {
-						localStorage.setItem("mcp.diff.view", view);
-					}
-					catch (e) {}
 				}
 				function updateContextButton(btn, open) {
 					btn.textContent = open ? btn.getAttribute("data-expanded") : btn.getAttribute("data-collapsed");
@@ -1348,54 +1360,37 @@ table.diff.diff-layout-unified td.code {
 					document.getElementById("split-body").innerHTML = renderSplit(blocks, language, lineSets, parsed.warningMessage || "");
 					bindContextToggles();
 				}
-				var stored = null;
-				try {
-					stored = localStorage.getItem("mcp.diff.view");
-				}
-				catch (e) {}
-				setView(stored || "unified");
+				setView("unified");
 				document.querySelectorAll("button.toggle").forEach(function (btn) {
 					btn.addEventListener("click", function () {
 						setView(btn.getAttribute("data-view"));
 					});
 				});
+				function setState(state) {
+					document.body.setAttribute("data-state", state);
+				}
 				function applyResult(result) {
+					setState("ready");
 					renderFromStructuredContent(result && result.structuredContent);
 				}
-				function applyFallback() {
-					renderFromStructuredContent(window.structuredContent || (window.mcp && window.mcp.structuredContent) || null);
+				function showLoading() {
+					setState("loading");
 				}
-				if (window.App) {
-					try {
-						var app = new window.App({
-							name: "nabu-diff",
-							version: "1.0.0"
+				try {
+					var app = new window.App({
+						name: "mcp-fs-diff",
+						version: "1.0.0"
+					});
+					app.ontoolresult = applyResult;
+					if (typeof app.connect === "function") {
+						app.connect().then(showLoading).catch(function (e) {
+							console.error("Failed to connect MCP App", e);
 						});
-						app.ontoolresult = applyResult;
-						if (typeof app.connect === "function") {
-							app.connect().catch(function (e) {
-								console.error("Failed to connect MCP App", e);
-							});
-						}
-					}
-					catch (e) {
-						console.error("Failed to initialize MCP App", e);
 					}
 				}
-				if (window.mcp) {
-					try {
-						window.mcp.ontoolresult = applyResult;
-						if (typeof window.mcp.connect === "function") {
-							window.mcp.connect().catch(function (e) {
-								console.error("Failed to connect MCP bridge", e);
-							});
-						}
-					}
-					catch (e) {
-						console.error("Failed to initialize MCP bridge", e);
-					}
+				catch (e) {
+					console.error("Failed to initialize MCP App", e);
 				}
-				applyFallback();
 			})();
 		</script>
 	</body>

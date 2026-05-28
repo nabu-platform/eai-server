@@ -58,6 +58,10 @@ public class FragmentIndexService {
 		}
 	}
 
+	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
+		return backend.list(globs, namespaces, artifactTypes, artifactCategories);
+	}
+
 	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
 		return backend.search(pattern, globs, namespaces, artifactTypes, artifactCategories, caseSensitive, before, after, limit);
 	}

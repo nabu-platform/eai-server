@@ -156,6 +156,21 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
+	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
+		try {
+			List<Path> files = new ArrayList<Path>();
+			java.nio.file.Files.walk(root)
+				.filter(Files::isRegularFile)
+				.filter(path -> !path.getFileName().toString().endsWith(".properties"))
+				.forEach(files::add);
+			return listFiles(files, filterValues(globs), filterValues(namespaces), filterValues(artifactTypes), filterValues(artifactCategories));
+		}
+		catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	@Override
 	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
 		ensureRipgrep();
 		List<String> command = new ArrayList<String>();
@@ -269,6 +284,52 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 			results.add(new FragmentSearch(artifactId, relativizeFragment(artifactRoot, file), fragment.get("artifactType"), fragment.get("artifactCategory"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, entry.getValue(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
 		}
 		return results;
+	}
+
+	private List<FragmentSearch> listFiles(List<Path> files, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) throws IOException {
+		List<FragmentSearch> results = new ArrayList<FragmentSearch>();
+		for (Path file : files) {
+			Path artifactRoot = resolveArtifactRoot(file);
+			Map<String, String> fragment = loadProperties(propertiesFile(file));
+			Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
+			properties.remove("hash");
+			properties.remove("artifactType");
+			properties.remove("artifactCategory");
+			properties.remove("fragmentType");
+			properties.remove("contentType");
+			properties.remove("editable");
+			properties.remove("removable");
+			String artifactId = decodeArtifactId(artifactRoot.getFileName().toString());
+			String path = relativizeFragment(artifactRoot, file);
+			if (!matchesNamespace(namespaces, artifactId)) {
+				continue;
+			}
+			if (!matchesGlob(globs, artifactId, path)) {
+				continue;
+			}
+			if (!artifactTypes.isEmpty() && !artifactTypes.contains(fragment.get("artifactType"))) {
+				continue;
+			}
+			if (!artifactCategories.isEmpty() && !artifactCategories.contains(fragment.get("artifactCategory"))) {
+				continue;
+			}
+			results.add(new FragmentSearch(artifactId, path, fragment.get("artifactType"), fragment.get("artifactCategory"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, Collections.<String>emptyList(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
+		}
+		return results;
+	}
+
+	private boolean matchesGlob(List<String> globs, String artifactId, String path) {
+		if (globs == null || globs.isEmpty()) {
+			return true;
+		}
+		String candidate = artifactId + "/" + path;
+		for (String glob : globs) {
+			String regex = glob.replace("\\", "\\\\").replace(".", "\\.").replace("*", ".*").replace("?", ".");
+			if (candidate.matches(regex)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private List<String> filterValues(List<String> values) {

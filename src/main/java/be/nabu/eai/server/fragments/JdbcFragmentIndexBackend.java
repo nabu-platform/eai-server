@@ -141,6 +141,95 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
+	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
+		Connection connection = null;
+		PreparedStatement statement = null;
+		ResultSet resultSet = null;
+		List<String> filteredGlobs = filterValues(globs);
+		List<String> filteredNamespaces = filterValues(namespaces);
+		List<String> filteredArtifactTypes = filterValues(artifactTypes);
+		List<String> filteredArtifactCategories = filterValues(artifactCategories);
+		try {
+			connection = dataSource.getConnection();
+			StringBuilder sql = new StringBuilder("select artifact_id, path, artifact_type, artifact_category, fragment_type, content, content_type, properties, editable, removable from fragment_index");
+			boolean hasWhere = false;
+			if (!filteredNamespaces.isEmpty()) {
+				sql.append(" where (");
+				for (int i = 0; i < filteredNamespaces.size(); i++) {
+					if (i > 0) {
+						sql.append(" or ");
+					}
+					sql.append("artifact_id = ? or artifact_id like ?");
+				}
+				sql.append(")");
+				hasWhere = true;
+			}
+			if (!filteredGlobs.isEmpty()) {
+				sql.append(hasWhere ? " and (" : " where (");
+				for (int i = 0; i < filteredGlobs.size(); i++) {
+					if (i > 0) {
+						sql.append(" or ");
+					}
+					sql.append("artifact_id || '/' || path like ? escape '\\\\'");
+				}
+				sql.append(")");
+				hasWhere = true;
+			}
+			if (!filteredArtifactTypes.isEmpty()) {
+				sql.append(hasWhere ? " and (" : " where (");
+				for (int i = 0; i < filteredArtifactTypes.size(); i++) {
+					if (i > 0) {
+						sql.append(" or ");
+					}
+					sql.append("artifact_type = ?");
+				}
+				sql.append(")");
+				hasWhere = true;
+			}
+			if (!filteredArtifactCategories.isEmpty()) {
+				sql.append(hasWhere ? " and (" : " where (");
+				for (int i = 0; i < filteredArtifactCategories.size(); i++) {
+					if (i > 0) {
+						sql.append(" or ");
+					}
+					sql.append("artifact_category = ?");
+				}
+				sql.append(")");
+			}
+			sql.append(" order by artifact_id, path");
+			statement = connection.prepareStatement(sql.toString());
+			int parameter = 1;
+			for (String namespace : filteredNamespaces) {
+				statement.setString(parameter++, namespace);
+				statement.setString(parameter++, namespace + ".%");
+			}
+			for (String glob : filteredGlobs) {
+				statement.setString(parameter++, toSqlLike(glob));
+			}
+			for (String artifactType : filteredArtifactTypes) {
+				statement.setString(parameter++, artifactType);
+			}
+			for (String artifactCategory : filteredArtifactCategories) {
+				statement.setString(parameter++, artifactCategory);
+			}
+			resultSet = statement.executeQuery();
+			List<FragmentSearch> results = new ArrayList<FragmentSearch>();
+			while (resultSet.next()) {
+				results.add(new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), resultSet.getString("artifact_category"), resultSet.getString("fragment_type"), resultSet.getString("content"), resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), Collections.<String>emptyList(), resultSet.getBoolean("editable"), resultSet.getBoolean("removable")));
+			}
+			return results;
+		}
+		catch (SQLException e) {
+			throw new RuntimeException(e);
+		}
+		finally {
+			close(resultSet);
+			close(statement);
+			close(connection);
+		}
+	}
+
+	@Override
 	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
 		Pattern compiled;
 		try {

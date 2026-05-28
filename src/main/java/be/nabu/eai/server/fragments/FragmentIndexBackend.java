@@ -11,5 +11,6 @@ public interface FragmentIndexBackend {
 	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments);
 	public void finalizeRebuild();
 	public void delete(String artifactId);
+	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories);
 	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit);
 }
