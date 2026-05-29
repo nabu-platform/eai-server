@@ -154,18 +154,52 @@ table.diff.diff-layout-unified td.code {
 	padding: 0.125rem 0.5rem;
 }
 
-.loading-shell {
+.status-shell {
 	display: none;
-	padding: 1rem 0;
-	color: var(--color-text-secondary, #4b4a44);
+	padding: 1rem;
+	margin: 0.5rem 0 0;
+	border: 1px solid color-mix(in srgb, var(--color-border-primary, #d8d7d1) 55%, var(--color-background-primary, #fdfdfb) 45%);
+	border-radius: var(--border-radius-md, 0.5rem);
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+
+.status-shell strong {
+	display: block;
+	margin-bottom: 0.25rem;
 	font-size: 0.875rem;
 }
 
-body[data-state='loading'] .loading-shell {
+.status-shell p {
+	margin: 0;
+}
+
+.loading-shell {
+	color: var(--color-text-secondary, #4b4a44);
+	background: color-mix(in srgb, var(--color-background-secondary, #f0f0ec) 65%, var(--color-background-primary, #fdfdfb) 35%);
+}
+
+.error-shell {
+	color: var(--color-text-danger, #b3343a);
+	background: color-mix(in srgb, var(--color-background-danger, #b3343a) 18%, var(--color-background-primary, #fdfdfb) 82%);
+	border-color: color-mix(in srgb, var(--color-background-danger, #b3343a) 45%, var(--color-border-primary, #d8d7d1) 55%);
+}
+
+.warning-shell {
+	color: var(--color-text-warning, #7a5c1f);
+	background: color-mix(in srgb, var(--color-background-warning, #7a5c1f) 18%, var(--color-background-primary, #fdfdfb) 82%);
+	border-color: color-mix(in srgb, var(--color-background-warning, #7a5c1f) 45%, var(--color-border-primary, #d8d7d1) 55%);
+}
+
+body[data-state='loading'] .loading-shell,
+body[data-state='error'] .error-shell,
+body[data-state='warning'] .warning-shell {
 	display: block;
 }
 
-body[data-state='loading'] #diff-table {
+body[data-state='loading'] #diff-table,
+body[data-state='error'] #diff-table,
+body[data-state='warning'] #diff-table {
 	display: none;
 }
 
@@ -329,7 +363,18 @@ table.diff.diff-layout-unified td.code {
 		</style>
 	</head>
 	<body data-view="unified" data-state="idle">
-		<div class="loading-shell" id="loading-shell">Loading diff...</div>
+		<div class="status-shell loading-shell" id="loading-shell">
+			<strong>Loading review</strong>
+			<p>Waiting for the tool result.</p>
+		</div>
+		<div class="status-shell error-shell" id="error-shell">
+			<strong>Could not render review</strong>
+			<p id="error-message">The tool returned an error.</p>
+		</div>
+		<div class="status-shell warning-shell" id="warning-shell">
+			<strong>No diff available</strong>
+			<p id="warning-message">There are no changes to display.</p>
+		</div>
 		<table class="diff diff-layout-unified" id="diff-table">
 			<thead class="diff-head-unified">
 				<tr>
@@ -1267,17 +1312,21 @@ table.diff.diff-layout-unified td.code {
 							}
 						}
 						if (line.slice(0, 2) === "@@") {
-							var match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+							var match = /^@@(?: -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?)? @@/.exec(line);
 							if (!match) {
 								return null;
 							}
-							var targetOriginalIndex = Math.max(parseInt(match[1], 10) - 1, 0);
-							while (originalIndex < targetOriginalIndex && originalIndex < originalLines.length) {
-								var equalText = originalLines[originalIndex];
-								changes.push({ type: "equal", originalLine: originalIndex + 1, newLine: newIndex + 1, text: equalText });
-								pushCurrentLine(equalText);
-								originalIndex += 1;
-								newIndex += 1;
+							if (match[1] && match[3]) {
+								var targetOriginalIndex = Math.max(parseInt(match[1], 10) - 1, 0);
+								var targetNewIndex = Math.max(parseInt(match[3], 10) - 1, 0);
+								while (originalIndex < targetOriginalIndex && originalIndex < originalLines.length) {
+									var equalText = originalLines[originalIndex];
+									changes.push({ type: "equal", originalLine: originalIndex + 1, newLine: newIndex + 1, text: equalText });
+									pushCurrentLine(equalText);
+									originalIndex += 1;
+									newIndex += 1;
+								}
+								newIndex = Math.max(newIndex, targetNewIndex);
 							}
 							continue;
 						}
@@ -1321,7 +1370,7 @@ table.diff.diff-layout-unified td.code {
 						currentHtml: currentLineHtml
 					};
 				}
-				function buildCollapsedOriginalChanges(originalText) {
+				function buildCollapsedOriginalChanges(originalText, warningMessage) {
 					var originalLines = normalizeLines(originalText);
 					var changes = [];
 					for (var index = 0; index < originalLines.length; index += 1) {
@@ -1329,7 +1378,7 @@ table.diff.diff-layout-unified td.code {
 					}
 					return {
 						changes: changes,
-						warningMessage: "Diff unavailable or invalid. Showing original content only."
+						warningMessage: warningMessage || ""
 					};
 				}
 				function renderFromStructuredContent(structuredContent) {
@@ -1342,7 +1391,7 @@ table.diff.diff-layout-unified td.code {
 						parsed = buildChangesFromUnifiedDiff(originalText, structuredContent.diff, language);
 					}
 					if (!parsed) {
-						parsed = buildCollapsedOriginalChanges(originalText);
+						parsed = buildCollapsedOriginalChanges(originalText, structuredContent.diff === "" ? "" : "Diff unavailable or invalid. Showing original content only.");
 					}
 					var changes = parsed.changes;
 					var blocks = buildBlocks(changes);
@@ -1369,7 +1418,38 @@ table.diff.diff-layout-unified td.code {
 				function setState(state) {
 					document.body.setAttribute("data-state", state);
 				}
+				function setStatusMessage(id, message) {
+					var element = document.getElementById(id);
+					if (element) {
+						element.textContent = message;
+					}
+				}
+				function clearDiffTable() {
+					var unifiedBody = document.getElementById("unified-body");
+					var splitBody = document.getElementById("split-body");
+					if (unifiedBody) {
+						unifiedBody.innerHTML = "";
+					}
+					if (splitBody) {
+						splitBody.innerHTML = "";
+					}
+				}
+				function hasDiff(structuredContent) {
+					return !!(structuredContent && typeof structuredContent.diff === "string" && structuredContent.diff.trim() !== "");
+				}
 				function applyResult(result) {
+					if (result && result.isError) {
+						clearDiffTable();
+						setStatusMessage("error-message", result.structuredContent && result.structuredContent.message ? String(result.structuredContent.message) : "The tool returned an error.");
+						setState("error");
+						return;
+					}
+					if (!hasDiff(result && result.structuredContent)) {
+						clearDiffTable();
+						setStatusMessage("warning-message", "The tool returned successfully, but there is no diff to display.");
+						setState("warning");
+						return;
+					}
 					setState("ready");
 					renderFromStructuredContent(result && result.structuredContent);
 				}
