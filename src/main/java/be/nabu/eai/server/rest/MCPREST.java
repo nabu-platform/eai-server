@@ -81,6 +81,7 @@ import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.map.MapContent;
 import be.nabu.libs.types.map.MapContentWrapper;
 import be.nabu.libs.types.map.MapTypeGenerator;
+import be.nabu.libs.types.mask.MaskedContent;
 import be.nabu.libs.validator.api.Validation;
 import be.nabu.libs.validator.api.ValidationMessage.Severity;
 import be.nabu.utils.io.IOUtils;
@@ -504,6 +505,8 @@ public class MCPREST {
 			Map<String, Object> invokeAnnotations = new LinkedHashMap<String, Object>();
 			invokeAnnotations.put("scopes", Arrays.asList("execute:nabu:service"));
 			invokeAnnotations.put("intentTemplate", "Invoking {serviceId}");
+			invokeAnnotations.put("inputTemplate", "Service: {serviceId}\nInput:\n```json\n{input}\n```");
+			invokeAnnotations.put("outputTemplate", "Output:\n```json\n{output}\n```[\nTrace: {traceId}]");
 			invokeTool.put("annotations", invokeAnnotations);
 			Map<String, Object> invokeInputSchema = new LinkedHashMap<String, Object>();
 			invokeInputSchema.put("type", "object");
@@ -1305,7 +1308,7 @@ public class MCPREST {
 			manager.createArtifact(parent, name);
 			String artifactId = parent.getId() + "." + name;
 			reloadArtifactAfterMcpUpdate(parent.getId());
-			notifyCollaborationReload(artifactId);
+			notifyCollaborationCreate(artifactId);
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("code", "CREATED");
 			structuredContent.put("artifactId", artifactId);
@@ -1345,7 +1348,7 @@ public class MCPREST {
 			newEntry.saveCollection();
 			root.refresh(true);
 			reloadArtifactAfterMcpUpdate(newEntry.getId());
-			notifyCollaborationReload(newEntry.getId());
+			notifyCollaborationCreate(newEntry.getId());
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("code", "CREATED");
 			structuredContent.put("projectId", newEntry.getId());
@@ -1650,6 +1653,12 @@ public class MCPREST {
 	private void notifyCollaborationReload(String artifactId) {
 		if (server.getCollaborationListener() != null) {
 			server.getCollaborationListener().notifyArtifactReload(artifactId, "MCP updated");
+		}
+	}
+
+	private void notifyCollaborationCreate(String artifactId) {
+		if (server.getCollaborationListener() != null) {
+			server.getCollaborationListener().notifyArtifactCreate(artifactId, "MCP created");
 		}
 	}
 
@@ -2597,7 +2606,7 @@ public class MCPREST {
 		if (input == null) {
 			return service.getServiceInterface().getInputDefinition().newInstance();
 		}
-		return new MapContent(service.getServiceInterface().getInputDefinition(), input);
+		return new MaskedContent(new MapContent(service.getServiceInterface().getInputDefinition(), input), service.getServiceInterface().getInputDefinition());
 //		byte[] marshalled = marshal(input);
 //		JSONBinding binding = new JSONBinding(service.getServiceInterface().getInputDefinition(), Charset.forName("UTF-8"));
 //		binding.setEnableMapSupport(true);
