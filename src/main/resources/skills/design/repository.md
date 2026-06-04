@@ -40,3 +40,4 @@ Rules:
 - Avoid circular dependency chains between projects.
 - Prefer small, composable artifacts over large multi-purpose ones. Large artifacts are harder to review, reuse, test, and evolve safely.
 - Be mindful of backwards compatibility when updating existing artifacts. notify the user if something will break.
+- Avoid using deprecated artifacts

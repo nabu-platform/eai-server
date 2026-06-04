@@ -129,6 +129,20 @@ public class MCPREST {
 		}
 	}
 
+	private static class DiffLine {
+		private final char prefix;
+		private final String line;
+		private final int beforeLine;
+		private final int afterLine;
+
+		private DiffLine(char prefix, String line, int beforeLine, int afterLine) {
+			this.prefix = prefix;
+			this.line = line;
+			this.beforeLine = beforeLine;
+			this.afterLine = afterLine;
+		}
+	}
+
 	private static final String MCP_VERSION = "2025-03-26";
 	private static final String SEARCH_TOOL_NAME = "search_nabu_artifact_fragments";
 	private static final String FIND_TOOL_NAME = "find_nabu_artifact_fragment";
@@ -2283,46 +2297,116 @@ public class MCPREST {
 		return builder.toString();
 	}
 
-	private String buildLineDiff(String before, String after) {
+	static String buildLineDiff(String before, String after) {
 		List<String> beforeLines = splitLines(before);
 		List<String> afterLines = splitLines(after);
-		int prefix = 0;
-		while (prefix < beforeLines.size() && prefix < afterLines.size() && beforeLines.get(prefix).equals(afterLines.get(prefix))) {
-			prefix++;
-		}
-		int beforeSuffix = beforeLines.size() - 1;
-		int afterSuffix = afterLines.size() - 1;
-		while (beforeSuffix >= prefix && afterSuffix >= prefix && beforeLines.get(beforeSuffix).equals(afterLines.get(afterSuffix))) {
-			beforeSuffix--;
-			afterSuffix--;
-		}
-		int beforeStart = Math.max(0, prefix - 3);
-		int afterStart = Math.max(0, prefix - 3);
-		int beforeEnd = Math.min(beforeLines.size(), beforeSuffix + 4);
-		int afterEnd = Math.min(afterLines.size(), afterSuffix + 4);
+		List<DiffLine> lines = diffLines(beforeLines, afterLines);
 		StringBuilder builder = new StringBuilder();
-		builder.append("@@ -").append(hunkRange(beforeStart, beforeEnd - beforeStart)).append(" +").append(hunkRange(afterStart, afterEnd - afterStart)).append(" @@\n");
-		for (int i = beforeStart; i < prefix; i++) {
-			builder.append(' ').append(beforeLines.get(i)).append("\n");
-		}
-		for (int i = prefix; i <= beforeSuffix; i++) {
-			builder.append('-').append(beforeLines.get(i)).append("\n");
-		}
-		for (int i = prefix; i <= afterSuffix; i++) {
-			builder.append('+').append(afterLines.get(i)).append("\n");
-		}
-		for (int i = afterSuffix + 1; i < afterEnd; i++) {
-			builder.append(' ').append(afterLines.get(i)).append("\n");
+		int changeIndex = 0;
+		while (changeIndex < lines.size()) {
+			while (changeIndex < lines.size() && lines.get(changeIndex).prefix == ' ') {
+				changeIndex++;
+			}
+			if (changeIndex >= lines.size()) {
+				break;
+			}
+			int start = Math.max(0, changeIndex - 3);
+			int lastChange = changeIndex;
+			changeIndex++;
+			while (changeIndex < lines.size()) {
+				while (changeIndex < lines.size() && lines.get(changeIndex).prefix == ' ') {
+					changeIndex++;
+				}
+				if (changeIndex >= lines.size() || changeIndex - lastChange > 6) {
+					break;
+				}
+				lastChange = changeIndex;
+				changeIndex++;
+			}
+			appendHunk(builder, lines, start, Math.min(lines.size(), lastChange + 4));
 		}
 		return builder.toString();
 	}
 
-	private String hunkRange(int start, int count) {
+	private static void appendHunk(StringBuilder builder, List<DiffLine> lines, int start, int end) {
+		int beforeStart = findHunkStart(lines, start, true);
+		int afterStart = findHunkStart(lines, start, false);
+		int beforeCount = 0;
+		int afterCount = 0;
+		for (int i = start; i < end; i++) {
+			DiffLine line = lines.get(i);
+			if (line.prefix != '+') {
+				beforeCount++;
+			}
+			if (line.prefix != '-') {
+				afterCount++;
+			}
+		}
+		builder.append("@@ -").append(hunkRange(beforeStart - 1, beforeCount)).append(" +").append(hunkRange(afterStart - 1, afterCount)).append(" @@\n");
+		for (int i = start; i < end; i++) {
+			DiffLine line = lines.get(i);
+			builder.append(line.prefix).append(line.line).append("\n");
+		}
+	}
+
+	private static List<DiffLine> diffLines(List<String> beforeLines, List<String> afterLines) {
+		int[][] lengths = new int[beforeLines.size() + 1][afterLines.size() + 1];
+		for (int i = beforeLines.size() - 1; i >= 0; i--) {
+			for (int j = afterLines.size() - 1; j >= 0; j--) {
+				if (beforeLines.get(i).equals(afterLines.get(j))) {
+					lengths[i][j] = lengths[i + 1][j + 1] + 1;
+				}
+				else {
+					lengths[i][j] = Math.max(lengths[i + 1][j], lengths[i][j + 1]);
+				}
+			}
+		}
+		List<DiffLine> lines = new ArrayList<DiffLine>();
+		int beforeIndex = 0;
+		int afterIndex = 0;
+		while (beforeIndex < beforeLines.size() && afterIndex < afterLines.size()) {
+			if (beforeLines.get(beforeIndex).equals(afterLines.get(afterIndex))) {
+				lines.add(new DiffLine(' ', beforeLines.get(beforeIndex), beforeIndex + 1, afterIndex + 1));
+				beforeIndex++;
+				afterIndex++;
+			}
+			else if (lengths[beforeIndex + 1][afterIndex] >= lengths[beforeIndex][afterIndex + 1]) {
+				lines.add(new DiffLine('-', beforeLines.get(beforeIndex), beforeIndex + 1, 0));
+				beforeIndex++;
+			}
+			else {
+				lines.add(new DiffLine('+', afterLines.get(afterIndex), 0, afterIndex + 1));
+				afterIndex++;
+			}
+		}
+		while (beforeIndex < beforeLines.size()) {
+			lines.add(new DiffLine('-', beforeLines.get(beforeIndex), beforeIndex + 1, 0));
+			beforeIndex++;
+		}
+		while (afterIndex < afterLines.size()) {
+			lines.add(new DiffLine('+', afterLines.get(afterIndex), 0, afterIndex + 1));
+			afterIndex++;
+		}
+		return lines;
+	}
+
+	private static int findHunkStart(List<DiffLine> lines, int start, boolean before) {
+		for (int i = start; i < lines.size(); i++) {
+			DiffLine line = lines.get(i);
+			int lineNumber = before ? line.beforeLine : line.afterLine;
+			if (lineNumber > 0) {
+				return lineNumber;
+			}
+		}
+		return 1;
+	}
+
+	private static String hunkRange(int start, int count) {
 		int lineNumber = count == 0 ? start : start + 1;
 		return lineNumber + "," + count;
 	}
 
-	private List<String> splitLines(String content) {
+	private static List<String> splitLines(String content) {
 		if (content == null || content.isEmpty()) {
 			return Collections.emptyList();
 		}
