@@ -31,6 +31,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RejectedExecutionException;
 
 import be.nabu.eai.repository.CollectionImpl;
 import be.nabu.eai.repository.EAIRepositoryUtils;
@@ -87,9 +89,13 @@ import be.nabu.libs.validator.api.ValidationMessage.Severity;
 import be.nabu.utils.io.IOUtils;
 import be.nabu.utils.mime.api.Header;
 import be.nabu.utils.mime.impl.MimeHeader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import be.nabu.utils.mime.impl.PlainMimeContentPart;
 @Path("/mcp")
 public class MCPREST {
+
+	private static final Logger LOGGER = LoggerFactory.getLogger(MCPREST.class);
 
 	private static class ToolResult {
 		private final Map<String, Object> structuredContent;
@@ -1661,7 +1667,33 @@ public class MCPREST {
 	}
 
 	private void reloadArtifactAfterMcpUpdate(String artifactId) {
-		server.getRepository().reload(artifactId);
+		server.getRepository().reload(artifactId, false);
+		reloadDependenciesAfterMcpUpdate(artifactId);
+	}
+
+	private void reloadDependenciesAfterMcpUpdate(final String artifactId) {
+		Runnable reloadDependencies = new Runnable() {
+			@Override
+			public void run() {
+				try {
+					server.getRepository().reloadDependencies(Collections.singleton(artifactId));
+				}
+				catch (Exception e) {
+					LOGGER.warn("Could not reload dependencies after MCP update for " + artifactId, e);
+				}
+			}
+		};
+		try {
+			if (server.getPool() != null) {
+				server.getPool().submit(reloadDependencies);
+			}
+			else {
+				ForkJoinPool.commonPool().submit(reloadDependencies);
+			}
+		}
+		catch (RejectedExecutionException e) {
+			LOGGER.warn("Could not schedule dependency reload after MCP update for " + artifactId, e);
+		}
 	}
 
 	private void notifyCollaborationReload(String artifactId) {
