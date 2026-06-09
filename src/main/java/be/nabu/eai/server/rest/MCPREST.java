@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,6 +61,8 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 
 import be.nabu.eai.server.Server;
+import be.nabu.eai.server.documentation.DocumentationCatalogService;
+import be.nabu.eai.server.documentation.DocumentationSearch;
 import be.nabu.eai.server.fragments.FragmentIndexService;
 import be.nabu.eai.server.fragments.FragmentSearch;
 import be.nabu.eai.server.fragments.MCPUtils;
@@ -98,17 +101,17 @@ public class MCPREST {
 	private static final Logger LOGGER = LoggerFactory.getLogger(MCPREST.class);
 
 	private static class ToolResult {
-		private final Map<String, Object> structuredContent;
+		private final Object structuredContent;
 		private final List<Map<String, String>> content;
 		private final Map<String, Object> meta;
 		private final Boolean isError;
 		private final String message;
 
-		private ToolResult(Map<String, Object> structuredContent, List<Map<String, String>> content, Map<String, Object> meta) {
+		private ToolResult(Object structuredContent, List<Map<String, String>> content, Map<String, Object> meta) {
 			this(structuredContent, content, meta, null, null);
 		}
 
-		private ToolResult(Map<String, Object> structuredContent, List<Map<String, String>> content, Map<String, Object> meta, Boolean isError, String message) {
+		private ToolResult(Object structuredContent, List<Map<String, String>> content, Map<String, Object> meta, Boolean isError, String message) {
 			this.structuredContent = structuredContent;
 			this.content = content;
 			this.meta = meta;
@@ -158,6 +161,13 @@ public class MCPREST {
 	private static final String WRITE_TOOL_NAME = "write_nabu_artifact_fragment";
 	private static final String CREATE_FRAGMENT_TOOL_NAME = "create_nabu_artifact_fragment";
 	private static final String DELETE_FRAGMENT_TOOL_NAME = "delete_nabu_artifact_fragment";
+	private static final String SEARCH_DOCUMENTATION_TOOL_NAME = "search_nabu_documentation";
+	private static final String FIND_DOCUMENTATION_TOOL_NAME = "find_nabu_documentation";
+	private static final String READ_DOCUMENTATION_TOOL_NAME = "read_nabu_documentation";
+	private static final String READ_MULTIPLE_DOCUMENTATION_TOOL_NAME = "read_multiple_nabu_documentation";
+	private static final String EDIT_DOCUMENTATION_TOOL_NAME = "edit_nabu_documentation";
+	private static final String WRITE_DOCUMENTATION_TOOL_NAME = "write_nabu_documentation";
+	private static final String DELETE_DOCUMENTATION_TOOL_NAME = "delete_nabu_documentation";
 	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
 	private static final String CREATE_PROJECT_TOOL_NAME = "create_nabu_project";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
@@ -167,14 +177,37 @@ public class MCPREST {
 	private static final String SESSION_MAP = "mcp.rest.sessions";
 	private static final String REVIEW_RESOURCE_MAP = "mcp.rest.review.resources";
 	private static final String REVIEW_RESOURCE_URI = "ui://nabu/review/diff.html";
-	private static final int MAX_RESULT_BYTES = 32000;
+	private static final int MAX_RESULT_BYTES = 51200;
+	private static final int MAX_READ_BYTES = 50 * 1024;
+	private static final int MAX_READ_LINE_BYTES = 25 * 1024;
 	private static final int MAX_MULTI_READ_FRAGMENTS = 20;
 	private static final int MAX_MULTI_READ_BYTES = 64000;
-	private static final int SUMMARY_TOP = 20;
 	private static final long SESSION_TIMEOUT = 24L * 60L * 60L * 1000L;
 	private static final DateTimeFormatter TRACE_TIME_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC);
 	private static final String TRACE_INCLUDE_LINKS = "mcp.trace.include_links";
 	private static final ConcurrentMap<Class<?>, be.nabu.eai.repository.api.MCPTraceProvider> TRACE_PROVIDER_CACHE = new ConcurrentHashMap<Class<?>, be.nabu.eai.repository.api.MCPTraceProvider>();
+	private static final String[] BUILT_IN_TOOL_NAMES = new String[] {
+		SEARCH_TOOL_NAME,
+		FIND_TOOL_NAME,
+		READ_TOOL_NAME,
+		READ_MULTIPLE_TOOL_NAME,
+		EDIT_TOOL_NAME,
+		WRITE_TOOL_NAME,
+		CREATE_FRAGMENT_TOOL_NAME,
+		DELETE_FRAGMENT_TOOL_NAME,
+		SEARCH_DOCUMENTATION_TOOL_NAME,
+		FIND_DOCUMENTATION_TOOL_NAME,
+		READ_DOCUMENTATION_TOOL_NAME,
+		READ_MULTIPLE_DOCUMENTATION_TOOL_NAME,
+		EDIT_DOCUMENTATION_TOOL_NAME,
+		WRITE_DOCUMENTATION_TOOL_NAME,
+		DELETE_DOCUMENTATION_TOOL_NAME,
+		CREATE_TOOL_NAME,
+		CREATE_PROJECT_TOOL_NAME,
+		SKILLS_TOOL_NAME,
+		INVOKE_TOOL_NAME,
+		TRACE_SEARCH_TOOL_NAME
+	};
 
 	@Context
 	private Server server;
@@ -240,13 +273,13 @@ public class MCPREST {
 			return json(response, null);
 		}
 		if ("tools/list".equals(method)) {
-			resolveSessionConfiguration(request, false);
+			MCPConfiguration configuration = resolveSessionConfiguration(request, false);
 			Map<String, Object> result = new LinkedHashMap<String, Object>();
 			List<Map<String, Object>> tools = new ArrayList<Map<String, Object>>();
 			Map<String, Object> searchTool = new LinkedHashMap<String, Object>();
 			searchTool.put("name", SEARCH_TOOL_NAME);
 			searchTool.put("title", "Search nabu artifacts");
-			searchTool.put("description", "Search artifact fragments ripgrep style. Namespace filters artifacts by id prefix, while glob only filters fragment paths. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
+			searchTool.put("description", "Search artifact fragments ripgrep style. Match snippets include line numbers. Namespace filters artifacts by id prefix, while glob only filters fragment paths. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
 			Map<String, Object> searchAnnotations = new LinkedHashMap<String, Object>();
 			searchAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			searchAnnotations.put("intentTemplate", "Search for {pattern} [in namespaces {namespace}] [with glob {glob}] [context {context}] [before {beforeContext}] [after {afterContext}]");
@@ -323,7 +356,7 @@ public class MCPREST {
 			Map<String, Object> readTool = new LinkedHashMap<String, Object>();
 			readTool.put("name", READ_TOOL_NAME);
 			readTool.put("title", "Read nabu artifact fragment");
-			readTool.put("description", "Read lines from an indexed nabu artifact fragment.");
+			readTool.put("description", "Read lines from an indexed nabu artifact fragment. Returned content is line-numbered as 'N:content'.");
 			Map<String, Object> readAnnotations = new LinkedHashMap<String, Object>();
 			readAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			readAnnotations.put("intentTemplate", "Read artifact {artifactId} fragment {path} [from line {startLine}] [limit {limit}]");
@@ -343,7 +376,7 @@ public class MCPREST {
 			Map<String, Object> readMultipleTool = new LinkedHashMap<String, Object>();
 			readMultipleTool.put("name", READ_MULTIPLE_TOOL_NAME);
 			readMultipleTool.put("title", "Read multiple nabu artifact fragments");
-			readMultipleTool.put("description", "Read lines from multiple indexed nabu artifact fragments in one call. Results may be truncated to avoid excessive output.");
+			readMultipleTool.put("description", "Read lines from multiple indexed nabu artifact fragments in one call. Returned content is line-numbered as 'N:content'. Results may be truncated to avoid excessive output.");
 			Map<String, Object> readMultipleAnnotations = new LinkedHashMap<String, Object>();
 			readMultipleAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			readMultipleAnnotations.put("intentTemplate", "Read multiple artifact fragments");
@@ -414,6 +447,7 @@ public class MCPREST {
 			writeTool.put("outputSchema", writeOutputSchema());
 			writeTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
 			tools.add(writeTool);
+			addDocumentationTools(tools);
 			List<String> dynamicArtifactTypes = listDynamicArtifactTypes();
 			if (!dynamicArtifactTypes.isEmpty()) {
 				Map<String, Object> createFragmentTool = new LinkedHashMap<String, Object>();
@@ -573,6 +607,7 @@ public class MCPREST {
 			traceSearchTool.put("inputSchema", traceSearchInputSchema);
 			traceSearchTool.put("outputSchema", traceSearchOutputSchema());
 			tools.add(traceSearchTool);
+			addCustomTools(tools, configuration);
 			result.put("tools", tools);
 			response.put("result", result);
 			return json(response, null);
@@ -581,7 +616,8 @@ public class MCPREST {
 			MCPConfiguration configuration = resolveSessionConfiguration(request, true);
 			Map<String, Object> params = map(rpc.get("params"));
 			String name = params == null ? null : string(params.get("name"));
-			if (!SEARCH_TOOL_NAME.equals(name) && !FIND_TOOL_NAME.equals(name) && !READ_TOOL_NAME.equals(name) && !READ_MULTIPLE_TOOL_NAME.equals(name) && !EDIT_TOOL_NAME.equals(name) && !WRITE_TOOL_NAME.equals(name) && !CREATE_FRAGMENT_TOOL_NAME.equals(name) && !DELETE_FRAGMENT_TOOL_NAME.equals(name) && !CREATE_TOOL_NAME.equals(name) && !CREATE_PROJECT_TOOL_NAME.equals(name) && !SKILLS_TOOL_NAME.equals(name) && !INVOKE_TOOL_NAME.equals(name) && !TRACE_SEARCH_TOOL_NAME.equals(name)) {
+			MCPToolProvider<?> customToolProvider = isBuiltInToolName(name) ? null : findCustomToolProvider(name, configuration);
+			if (!isBuiltInToolName(name) && customToolProvider == null) {
 				response.put("error", error(-32602, "Unknown tool: " + name));
 				return json(response, null);
 			}
@@ -590,7 +626,11 @@ public class MCPREST {
 			Map<String, Object> result = new LinkedHashMap<String, Object>();
 			ToolResult toolResult;
 			try {
-				if (SEARCH_TOOL_NAME.equals(name)) {
+				if (customToolProvider != null) {
+					boolean preview = asBoolean(meta == null ? null : meta.get("preview"));
+					toolResult = customToolResult(customToolProvider, arguments, request, configuration, meta, preview);
+				}
+				else if (SEARCH_TOOL_NAME.equals(name)) {
 					toolResult = searchToolResult(arguments, meta, configuration);
 				}
 				else if (FIND_TOOL_NAME.equals(name)) {
@@ -601,6 +641,28 @@ public class MCPREST {
 				}
 				else if (READ_MULTIPLE_TOOL_NAME.equals(name)) {
 					toolResult = readMultipleToolResult(arguments, meta, configuration);
+				}
+				else if (SEARCH_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					toolResult = searchDocumentationToolResult(arguments, meta, configuration);
+				}
+				else if (FIND_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					toolResult = findDocumentationToolResult(arguments, meta, configuration);
+				}
+				else if (READ_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					toolResult = readDocumentationToolResult(arguments, meta, configuration);
+				}
+				else if (READ_MULTIPLE_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					toolResult = readMultipleDocumentationToolResult(arguments, meta, configuration);
+				}
+				else if (DELETE_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					boolean preview = asBoolean(meta == null ? null : meta.get("preview"));
+					toolResult = deleteDocumentationToolResult(arguments, meta, configuration, preview);
+				}
+				else if (EDIT_DOCUMENTATION_TOOL_NAME.equals(name) || WRITE_DOCUMENTATION_TOOL_NAME.equals(name)) {
+					boolean preview = asBoolean(meta == null ? null : meta.get("preview"));
+					toolResult = EDIT_DOCUMENTATION_TOOL_NAME.equals(name)
+						? editDocumentationToolResult(arguments, meta, configuration, preview)
+						: writeDocumentationToolResult(arguments, meta, configuration, preview);
 				}
 				else if (CREATE_FRAGMENT_TOOL_NAME.equals(name)) {
 					toolResult = createFragmentToolResult(arguments, meta, configuration);
@@ -653,18 +715,15 @@ public class MCPREST {
 
 	private ToolResult searchToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) throws IOException, ParseException {
 		MCPToolCallInput input = bind(arguments, MCPToolCallInput.class);
-		List<MCPFragmentSearchResult> allResults = search(input, meta, configuration);
 		Integer limit = input != null && input.getLimit() != null && input.getLimit().intValue() > 0 ? input.getLimit() : null;
 		int offset = input != null && input.getOffset() != null && input.getOffset().intValue() >= 0 ? input.getOffset().intValue() : 0;
+		List<MCPFragmentSearchResult> allResults = search(input, meta, configuration);
 		int from = Math.min(offset, allResults.size());
 		int to = limit == null ? allResults.size() : Math.min(from + limit.intValue(), allResults.size());
 		List<MCPFragmentSearchResult> page = new ArrayList<MCPFragmentSearchResult>(allResults.subList(from, to));
-		Map<String, Object> structuredContent = optimizeResults(input.getPattern(), page);
-		structuredContent.put("totalResults", allResults.size());
-		structuredContent.put("offset", offset);
-		structuredContent.put("limit", limit);
-		structuredContent.put("truncated", Boolean.TRUE.equals(structuredContent.get("truncated")) || to < allResults.size());
-		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		boolean truncated = to < allResults.size();
+		Map<String, Object> structuredContent = optimizeResults(input.getPattern(), page, allResults.size(), offset, limit, truncated);
+		List<Map<String, String>> content = textContent(buildSummaryText(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildSearchDisplayMessage(structuredContent)));
 	}
 
@@ -1161,6 +1220,369 @@ public class MCPREST {
 		return new ToolResult(writeResult.structuredContent, content, toolMeta, writeResult.isError, writeResult.message);
 	}
 
+	private ToolResult searchDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		String pattern = requiredString(arguments, "pattern", "MISSING_PATTERN");
+		int before = integer(arguments.get("beforeContext"), 0);
+		int after = integer(arguments.get("afterContext"), 0);
+		int offset = integer(arguments.get("offset"), 0);
+		if (arguments.get("context") != null) {
+			before = integer(arguments.get("context"), 0);
+			after = before;
+		}
+		if (offset < 0) {
+			throw protocolError("INVALID_OFFSET", "Argument 'offset' must be a non-negative integer.");
+		}
+		List<String> namespaces = resolveNamespaces(configuration, stringList(arguments.get("namespace")), meta);
+		boolean caseSensitive = booleanArgument(arguments.get("caseSensitive"), false);
+		int limit = integer(arguments.get("limit"), 0);
+		List<DocumentationSearch> search = documentationCatalog().search(pattern, stringList(arguments.get("glob")), namespaces, caseSensitive, before, after, 0);
+		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+		for (DocumentationSearch document : search) {
+			results.add(documentationMap(document, true));
+		}
+		int from = Math.min(offset, results.size());
+		int to = limit > 0 ? Math.min(from + limit, results.size()) : results.size();
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("results", new ArrayList<Map<String, Object>>(results.subList(from, to)));
+		structuredContent.put("pattern", pattern);
+		structuredContent.put("count", to - from);
+		structuredContent.put("totalResults", results.size());
+		structuredContent.put("totalMatches", countDocumentationMatches(search));
+		structuredContent.put("truncated", to < results.size());
+		structuredContent.put("mode", "full");
+		return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, "Found " + (to - from) + " documentation result(s)."));
+	}
+
+	private ToolResult findDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String namespace = string(arguments.get("namespace"));
+		String pattern = string(arguments.get("pattern"));
+		boolean glob = asBoolean(arguments.get("glob"));
+		boolean caseSensitive = booleanArgument(arguments.get("caseSensitive"), false);
+		int limit = integer(arguments.get("limit"), 200);
+		int offset = integer(arguments.get("offset"), 0);
+		if (limit <= 0) {
+			throw protocolError("INVALID_LIMIT", "Argument 'limit' must be a positive integer.");
+		}
+		if (offset < 0) {
+			throw protocolError("INVALID_OFFSET", "Argument 'offset' must be a non-negative integer.");
+		}
+		List<Map<String, Object>> files = new ArrayList<Map<String, Object>>();
+		for (DocumentationSearch document : documentationCatalog().list(null, namespaces)) {
+			if (namespace != null && !namespace.equals(document.getNamespace())) {
+				continue;
+			}
+			if (pattern != null && !pattern.trim().isEmpty() && !matchesFindPattern(pattern, glob, caseSensitive, document.getNamespace(), document.getPath())) {
+				continue;
+			}
+			files.add(documentationMap(document, false));
+		}
+		int total = files.size();
+		int from = Math.min(offset, total);
+		int to = Math.min(from + limit, total);
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("files", new ArrayList<Map<String, Object>>(files.subList(from, to)));
+		structuredContent.put("count", to - from);
+		structuredContent.put("total", total);
+		structuredContent.put("limit", limit);
+		structuredContent.put("offset", offset);
+		structuredContent.put("truncated", to < total);
+		return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildFindDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult readDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		Map<String, Object> structuredContent = readDocumentation(arguments, resolveNamespaces(configuration, null, meta));
+		return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildReadDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult readMultipleDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		List<Object> documents = list(arguments.get("documents"));
+		if (documents == null) {
+			throw protocolError("MISSING_DOCUMENTS", "Missing required argument 'documents'.");
+		}
+		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+		int totalBytes = 0;
+		for (Object single : documents) {
+			if (!(single instanceof Map)) {
+				throw protocolError("INVALID_DOCUMENT", "Each entry in 'documents' must be an object.");
+			}
+			@SuppressWarnings("unchecked")
+			Map<String, Object> document = (Map<String, Object>) single;
+			Map<String, Object> result = readDocumentation(document, namespaces);
+			String content = string(result.get("content"));
+			totalBytes += content == null ? 0 : content.getBytes(StandardCharsets.UTF_8).length;
+			if (results.size() >= MAX_MULTI_READ_FRAGMENTS || totalBytes > MAX_MULTI_READ_BYTES) {
+				break;
+			}
+			results.add(result);
+		}
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("documents", results);
+		structuredContent.put("count", results.size());
+		structuredContent.put("totalRequested", documents.size());
+		structuredContent.put("truncated", results.size() < documents.size());
+		return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildReadMultipleDisplayMessage(structuredContent)));
+	}
+
+	private ToolResult editDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
+		EditArtifactResult editResult = editDocumentation(arguments, meta, configuration, preview);
+		return new ToolResult(editResult.structuredContent, textContent(buildEditSummaryText(editResult.structuredContent)), buildToolMeta(editResult.resourceUri, buildEditDisplayMessage(editResult.structuredContent)), editResult.isError, editResult.message);
+	}
+
+	private ToolResult writeDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
+		EditArtifactResult writeResult = writeDocumentation(arguments, meta, configuration, preview);
+		return new ToolResult(writeResult.structuredContent, textContent(buildWriteSummaryText(writeResult.structuredContent)), buildToolMeta(writeResult.resourceUri, buildWriteDisplayMessage(writeResult.structuredContent)), writeResult.isError, writeResult.message);
+	}
+
+	private ToolResult deleteDocumentationToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException {
+		EditArtifactResult deleteResult = deleteDocumentation(arguments, meta, configuration, preview);
+		return new ToolResult(deleteResult.structuredContent, textContent(buildWriteSummaryText(deleteResult.structuredContent)), buildToolMeta(deleteResult.resourceUri, buildWriteDisplayMessage(deleteResult.structuredContent)), deleteResult.isError, deleteResult.message);
+	}
+
+	private EditArtifactResult editDocumentation(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String namespace = requiredString(arguments, "namespace", "MISSING_NAMESPACE");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		assertAllowedDocumentation(namespace, path, namespaces);
+		DocumentationSearch document = requiredDocumentation(namespace, path);
+		if (!document.isEditable()) {
+			throw protocolError("NOT_EDITABLE", "Documentation is not editable: '" + namespace + "' at path '" + path + "'.");
+		}
+		String before = document.getContent() == null ? "" : document.getContent();
+		String after = before;
+		int totalMatchCount = 0;
+		for (Map<String, String> edit : extractEdits(arguments, namespace, path)) {
+			String find = edit.get("find");
+			int matchCount = countMatches(after, find);
+			if (matchCount == 0) {
+				throw protocolError("FIND_NOT_FOUND", "No match found for the requested 'find' text in documentation '" + namespace + "' at path '" + path + "'.");
+			}
+			if (matchCount > 1) {
+				throw protocolError("FIND_NOT_UNIQUE", "The requested 'find' text matches multiple locations in documentation '" + namespace + "' at path '" + path + "'. Provide a more specific match.");
+			}
+			after = after.replace(find, edit.get("replace"));
+			totalMatchCount += matchCount;
+		}
+		return finishDocumentationWrite(namespace, path, before, after, totalMatchCount, preview);
+	}
+
+	private EditArtifactResult writeDocumentation(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String namespace = requiredString(arguments, "namespace", "MISSING_NAMESPACE");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		String content = string(arguments.get("content"));
+		String mode = string(arguments.get("mode"));
+		if (mode == null) {
+			mode = "overwrite";
+		}
+		if (!"overwrite".equals(mode) && !"append".equals(mode) && !"prepend".equals(mode)) {
+			throw protocolError("INVALID_MODE", "Mode must be one of: overwrite, append, prepend.");
+		}
+		assertAllowedDocumentation(namespace, path, namespaces);
+		DocumentationSearch existing = documentationCatalog().get(namespace, path);
+		if (existing != null && !existing.isEditable()) {
+			throw protocolError("NOT_EDITABLE", "Documentation is not editable: '" + namespace + "' at path '" + path + "'.");
+		}
+		String before = existing == null || existing.getContent() == null ? "" : existing.getContent();
+		String after = "append".equals(mode) ? before + content : ("prepend".equals(mode) ? content + before : content);
+		return finishDocumentationWrite(namespace, path, before, after, 1, preview);
+	}
+
+	private EditArtifactResult deleteDocumentation(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String namespace = requiredString(arguments, "namespace", "MISSING_NAMESPACE");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		assertAllowedDocumentation(namespace, path, namespaces);
+		DocumentationSearch document = requiredDocumentation(namespace, path);
+		if (!document.isRemovable()) {
+			throw protocolError("NOT_REMOVABLE", "Documentation is not removable: '" + namespace + "' at path '" + path + "'.");
+		}
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("namespace", namespace);
+		structuredContent.put("path", path);
+		structuredContent.put("count", 1);
+		structuredContent.put("updatedCount", preview ? 1 : 0);
+		structuredContent.put("failedCount", 0);
+		structuredContent.put("message", preview ? "Preview delete documentation '" + path + "'." : "Deleted documentation '" + path + "'.");
+		if (!preview) {
+			documentationCatalog().delete(namespace, path);
+		}
+		ensureStaticReviewResource();
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, false, null);
+	}
+
+	private EditArtifactResult finishDocumentationWrite(String namespace, String path, String before, String after, int matchCount, boolean preview) throws IOException {
+		Map<String, Object> operation = new LinkedHashMap<String, Object>();
+		operation.put("artifactId", namespace);
+		operation.put("path", path);
+		operation.put("before", before);
+		operation.put("after", after);
+		operation.put("matchCount", matchCount);
+		Map<String, Object> update = new LinkedHashMap<String, Object>();
+		update.put("namespace", namespace);
+		update.put("path", path);
+		update.put("matchCount", matchCount);
+		update.put("original", before);
+		update.put("new", after);
+		update.put("diff", buildFallbackDiff(Arrays.asList(operation)));
+		int successCount = preview ? 1 : 0;
+		if (!preview) {
+			documentationCatalog().write(namespace, path, after, "overwrite");
+			successCount = 1;
+		}
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("namespace", namespace);
+		structuredContent.put("path", path);
+		structuredContent.put("matchCount", matchCount);
+		structuredContent.put("original", before);
+		structuredContent.put("new", after);
+		structuredContent.put("diff", update.get("diff"));
+		structuredContent.put("count", 1);
+		structuredContent.put("updatedCount", successCount);
+		structuredContent.put("failedCount", 1 - successCount);
+		structuredContent.put("updates", Arrays.asList(update));
+		structuredContent.put("isError", false);
+		ensureStaticReviewResource();
+		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, false, null);
+	}
+
+	private Map<String, Object> readDocumentation(Map<String, Object> arguments, List<String> namespaces) {
+		String namespace = requiredString(arguments, "namespace", "MISSING_NAMESPACE");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		assertAllowedDocumentation(namespace, path, namespaces);
+		int startLine = integer(arguments.get("startLine"), 1);
+		int limit = integer(arguments.get("limit"), 200);
+		if (startLine <= 0) {
+			throw protocolError("INVALID_START_LINE", "Argument 'startLine' must be a positive integer.");
+		}
+		if (limit <= 0) {
+			throw protocolError("INVALID_LIMIT", "Argument 'limit' must be a positive integer.");
+		}
+		DocumentationSearch document = requiredDocumentation(namespace, path);
+		Map<String, Object> structuredContent = readLines(document.getContent() == null ? "" : document.getContent(), path, startLine, limit);
+		structuredContent.put("namespace", namespace);
+		structuredContent.put("editable", document.isEditable());
+		structuredContent.put("removable", document.isRemovable());
+		return structuredContent;
+	}
+
+	private Map<String, Object> readLines(String content, String path, int startLine, int limit) {
+		String[] lines = content.split("\\r?\\n", -1);
+		int total = lines.length;
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("path", path);
+		structuredContent.put("startLine", startLine);
+		structuredContent.put("total", total);
+		if (startLine > total) {
+			structuredContent.put("count", 0);
+			structuredContent.put("content", "");
+			structuredContent.put("code", "EMPTY_RANGE");
+			return structuredContent;
+		}
+		int from = startLine - 1;
+		StringBuilder builder = new StringBuilder();
+		List<String> truncatedReason = new ArrayList<String>();
+		int count = 0;
+		int totalBytes = 0;
+		boolean truncated = false;
+		for (int i = from; i < lines.length; i++) {
+			if (count >= limit) {
+				truncated = true;
+				if (!truncatedReason.contains("line_limit")) {
+					truncatedReason.add("line_limit");
+				}
+				break;
+			}
+			String line = lines[i];
+			int lineBytes = line.getBytes(StandardCharsets.UTF_8).length;
+			if (lineBytes > MAX_READ_LINE_BYTES) {
+				String truncatedLine = truncateToBytes(line, MAX_READ_LINE_BYTES);
+				int keptBytes = truncatedLine.getBytes(StandardCharsets.UTF_8).length;
+				line = truncatedLine + " [TRUNCATED: " + (lineBytes - keptBytes) + " bytes hidden]";
+				truncated = true;
+				if (!truncatedReason.contains("long_lines")) {
+					truncatedReason.add("long_lines");
+				}
+			}
+			String lineContent = (i + 1) + ":" + line;
+			String formatted = builder.length() == 0 ? lineContent : "\n" + lineContent;
+			int formattedBytes = formatted.getBytes(StandardCharsets.UTF_8).length;
+			if (totalBytes + formattedBytes > MAX_READ_BYTES) {
+				truncated = true;
+				if (!truncatedReason.contains("max_bytes")) {
+					truncatedReason.add("max_bytes");
+				}
+				break;
+			}
+			builder.append(formatted);
+			totalBytes += formattedBytes;
+			count++;
+		}
+		if (from + count < lines.length) {
+			truncated = true;
+			if (!truncatedReason.contains("line_limit") && count >= limit) {
+				truncatedReason.add("line_limit");
+			}
+		}
+		structuredContent.put("count", count);
+		structuredContent.put("content", builder.toString());
+		structuredContent.put("truncated", truncated);
+		if (truncated) {
+			structuredContent.put("truncated_reason", truncatedReason);
+		}
+		return structuredContent;
+	}
+
+	private Map<String, Object> documentationMap(DocumentationSearch document, boolean includeMatches) {
+		Map<String, Object> entry = new LinkedHashMap<String, Object>();
+		entry.put("namespace", document.getNamespace());
+		entry.put("path", document.getPath());
+		entry.put("contentType", document.getContentType());
+		entry.put("editable", document.isEditable());
+		entry.put("removable", document.isRemovable());
+		if (document.getProperties() != null && !document.getProperties().isEmpty()) {
+			entry.put("properties", document.getProperties());
+		}
+		if (includeMatches) {
+			entry.put("matches", groupMatches(document.getMatches()));
+		}
+		return entry;
+	}
+
+	private int countDocumentationMatches(List<DocumentationSearch> documents) {
+		int count = 0;
+		for (DocumentationSearch document : documents) {
+			count += groupMatches(document.getMatches()).size();
+		}
+		return count;
+	}
+
+	private DocumentationSearch requiredDocumentation(String namespace, String path) {
+		DocumentationSearch document = documentationCatalog().get(namespace, path);
+		if (document == null) {
+			throw protocolError("INVALID_PATH", "Documentation not found for namespace '" + namespace + "' at path '" + path + "'.");
+		}
+		return document;
+	}
+
+	private void assertAllowedDocumentation(String namespace, String path, List<String> namespaces) {
+		if (!isAllowedNamespace(namespace, namespaces)) {
+			throw protocolError("INVALID_PATH", "Namespace '" + namespace + "' is outside the allowed namespaces.");
+		}
+		if (path == null || path.startsWith("/") || path.contains("../") || path.equals("..") || path.contains("/..")) {
+			throw protocolError("INVALID_PATH", "Invalid documentation path: '" + path + "'.");
+		}
+	}
+
+	private DocumentationCatalogService documentationCatalog() {
+		DocumentationCatalogService service = server.getDocumentationCatalogService();
+		if (service == null) {
+			throw new HTTPException(503, "The documentation catalog is unavailable.");
+		}
+		return service;
+	}
+
 	private EditArtifactResult editArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
 		List<String> namespaces = resolveNamespaces(configuration, null, meta);
 		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
@@ -1435,30 +1857,8 @@ public class MCPREST {
 		}
 		FragmentSearch fragment = getIndexedFragment(artifactId, path, namespaces);
 		String content = fragment.getContent() == null ? "" : fragment.getContent();
-		String[] lines = content.split("\\r?\\n", -1);
-		int total = lines.length;
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("path", path);
+		Map<String, Object> structuredContent = readLines(content, path, startLine, limit);
 		structuredContent.put("artifactId", artifactId);
-		structuredContent.put("startLine", startLine);
-		structuredContent.put("total", total);
-		if (startLine > total) {
-			structuredContent.put("count", 0);
-			structuredContent.put("content", "");
-			structuredContent.put("code", "EMPTY_RANGE");
-			return structuredContent;
-		}
-		int from = startLine - 1;
-		int to = Math.min(lines.length, from + limit);
-		StringBuilder builder = new StringBuilder();
-		for (int i = from; i < to; i++) {
-			if (builder.length() > 0) {
-				builder.append('\n');
-			}
-			builder.append(lines[i]);
-		}
-		structuredContent.put("count", to - from);
-		structuredContent.put("content", builder.toString());
 		return structuredContent;
 	}
 
@@ -1739,33 +2139,24 @@ public class MCPREST {
 		return results;
 	}
 
-	private Map<String, Object> optimizeResults(String pattern, List<MCPFragmentSearchResult> results) {
-		int totalResults = results.size();
+	private Map<String, Object> optimizeResults(String pattern, List<MCPFragmentSearchResult> results, int totalResults, int offset, Integer limit, boolean pageTruncated) {
 		int totalMatches = countMatches(results);
-		String mode = "full";
-		boolean truncated = false;
-		Object output = results;
-		if (estimateStructuredContentSize(pattern, results, totalResults, totalMatches, mode, truncated) > MAX_RESULT_BYTES) {
-			List<Map<String, Object>> reduced = reduceResults(results);
-			mode = "reduced";
-			truncated = true;
-			output = reduced;
-			if (estimateStructuredContentSize(pattern, reduced, totalResults, totalMatches, mode, truncated) > MAX_RESULT_BYTES) {
-				List<Map<String, Object>> summary = summarizeResults(results);
-				summary = reduceSummary(pattern, summary, totalResults, totalMatches);
-				mode = "summary";
-				output = summary;
-			}
+		Map<String, Object> structuredContent = searchStructuredContent(pattern, results, totalResults, totalMatches, "full", pageTruncated, offset, limit);
+		if (structuredContentSize(structuredContent) <= MAX_RESULT_BYTES) {
+			return structuredContent;
 		}
-		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
-		structuredContent.put("results", output);
-		structuredContent.put("pattern", pattern);
-		structuredContent.put("count", output instanceof List ? ((List<?>) output).size() : 0);
-		structuredContent.put("totalResults", totalResults);
-		structuredContent.put("totalMatches", totalMatches);
-		structuredContent.put("truncated", truncated);
-		structuredContent.put("mode", mode);
-		return structuredContent;
+		List<Map<String, Object>> reduced = reduceResults(results);
+		structuredContent = searchStructuredContent(pattern, reduced, totalResults, totalMatches, "reduced", true, offset, limit);
+		if (structuredContentSize(structuredContent) <= MAX_RESULT_BYTES) {
+			return structuredContent;
+		}
+		List<Map<String, Object>> summary = summarizeResults(results);
+		structuredContent = searchStructuredContent(pattern, summary, totalResults, totalMatches, "summary", true, offset, limit);
+		if (structuredContentSize(structuredContent) <= MAX_RESULT_BYTES) {
+			return structuredContent;
+		}
+		summary = reduceSummary(pattern, summary, totalResults, totalMatches, offset, limit);
+		return searchStructuredContent(pattern, summary, totalResults, totalMatches, "summary", true, offset, limit);
 	}
 
 	private String buildEditSummaryText(Map<String, Object> structuredContent) {
@@ -1850,6 +2241,9 @@ public class MCPREST {
 		builder.append("Found ").append(totalResults.intValue()).append(" results");
 		if (!"full".equals(mode)) {
 			builder.append(" (").append(mode).append(" output)");
+		}
+		if (Boolean.TRUE.equals(structuredContent.get("truncated"))) {
+			builder.append(". Result set is too large; search for more specific terms or add narrower namespace, artifact type, category, or glob filters.");
 		}
 		return builder.toString();
 	}
@@ -1979,6 +2373,10 @@ public class MCPREST {
 	private List<Map<String, Object>> reduceResults(List<MCPFragmentSearchResult> results) {
 		List<Map<String, Object>> reduced = new ArrayList<Map<String, Object>>();
 		for (MCPFragmentSearchResult result : results) {
+			List<String> matches = reduceContextLines(result.getMatches());
+			if (matches.isEmpty()) {
+				continue;
+			}
 			Map<String, Object> single = new LinkedHashMap<String, Object>();
 			single.put("artifactId", result.getArtifactId());
 			single.put("path", result.getPath());
@@ -1989,10 +2387,49 @@ public class MCPREST {
 			single.put("properties", result.getProperties());
 			single.put("editable", result.isEditable());
 			single.put("removable", result.isRemovable());
-			single.put("matchCount", result.getMatches() == null ? 0 : result.getMatches().size());
+			single.put("matches", matches);
 			reduced.add(single);
 		}
 		return reduced;
+	}
+
+	private List<String> reduceContextLines(List<String> matches) {
+		if (matches == null || matches.isEmpty()) {
+			return Collections.emptyList();
+		}
+		List<String> reduced = new ArrayList<String>();
+		for (String chunk : matches) {
+			StringBuilder builder = new StringBuilder();
+			String[] lines = chunk.split("\\n");
+			for (String line : lines) {
+				if (isSearchMatchLine(line)) {
+					if (builder.length() > 0) {
+						builder.append('\n');
+					}
+					builder.append(line);
+				}
+			}
+			if (builder.length() > 0) {
+				reduced.add(builder.toString());
+			}
+		}
+		return reduced;
+	}
+
+	private boolean isSearchMatchLine(String line) {
+		if (line == null) {
+			return false;
+		}
+		boolean sawDigit = false;
+		for (int i = 0; i < line.length(); i++) {
+			char character = line.charAt(i);
+			if (character >= '0' && character <= '9') {
+				sawDigit = true;
+				continue;
+			}
+			return sawDigit && character == ':';
+		}
+		return false;
 	}
 
 	private List<Map<String, Object>> summarizeResults(List<MCPFragmentSearchResult> results) {
@@ -2007,10 +2444,7 @@ public class MCPREST {
 		return summary;
 	}
 
-	private List<Map<String, Object>> reduceSummary(String pattern, List<Map<String, Object>> summary, int totalResults, int totalMatches) {
-		if (estimateStructuredContentSize(pattern, summary, totalResults, totalMatches, "summary", true) <= MAX_RESULT_BYTES) {
-			return summary;
-		}
+	private List<Map<String, Object>> reduceSummary(String pattern, List<Map<String, Object>> summary, int totalResults, int totalMatches, int offset, Integer limit) {
 		Collections.sort(summary, new Comparator<Map<String, Object>>() {
 			@Override
 			public int compare(Map<String, Object> left, Map<String, Object> right) {
@@ -2019,13 +2453,14 @@ public class MCPREST {
 				return Integer.compare(rightCount, leftCount);
 			}
 		});
-		int low = Math.min(SUMMARY_TOP, summary.size());
+		int low = 0;
 		int high = summary.size();
 		int best = 0;
 		while (low <= high) {
 			int middle = low + (high - low) / 2;
 			List<Map<String, Object>> candidate = new ArrayList<Map<String, Object>>(summary.subList(0, middle));
-			if (estimateStructuredContentSize(pattern, candidate, totalResults, totalMatches, "summary", true) <= MAX_RESULT_BYTES) {
+			Map<String, Object> structuredContent = searchStructuredContent(pattern, candidate, totalResults, totalMatches, "summary", true, offset, limit);
+			if (structuredContentSize(structuredContent) <= MAX_RESULT_BYTES) {
 				best = middle;
 				low = middle + 1;
 			}
@@ -2033,23 +2468,26 @@ public class MCPREST {
 				high = middle - 1;
 			}
 		}
-		if (best == 0) {
-			best = Math.min(SUMMARY_TOP, summary.size());
-		}
 		return new ArrayList<Map<String, Object>>(summary.subList(0, best));
 	}
 
-	private int estimateStructuredContentSize(String pattern, Object results, int totalResults, int totalMatches, String mode, boolean truncated) {
-		Map<String, Object> candidate = new LinkedHashMap<String, Object>();
-		candidate.put("results", results);
-		candidate.put("pattern", pattern);
-		candidate.put("count", results instanceof List ? ((List<?>) results).size() : 0);
-		candidate.put("totalResults", totalResults);
-		candidate.put("totalMatches", totalMatches);
-		candidate.put("truncated", truncated);
-		candidate.put("mode", mode);
+	private Map<String, Object> searchStructuredContent(String pattern, Object results, int totalResults, int totalMatches, String mode, boolean truncated, int offset, Integer limit) {
+		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+		structuredContent.put("results", results);
+		structuredContent.put("pattern", pattern);
+		structuredContent.put("count", results instanceof List ? ((List<?>) results).size() : 0);
+		structuredContent.put("totalResults", totalResults);
+		structuredContent.put("totalMatches", totalMatches);
+		structuredContent.put("offset", offset);
+		structuredContent.put("limit", limit);
+		structuredContent.put("truncated", truncated);
+		structuredContent.put("mode", mode);
+		return structuredContent;
+	}
+
+	private int structuredContentSize(Map<String, Object> structuredContent) {
 		try {
-			return marshal(candidate).length;
+			return marshal(structuredContent).length;
 		}
 		catch (IOException e) {
 			return Integer.MAX_VALUE;
@@ -2059,6 +2497,26 @@ public class MCPREST {
 
 	private int number(Integer value) {
 		return value == null ? 0 : Math.max(0, value.intValue());
+	}
+
+
+	private String truncateToBytes(String input, int maxBytes) {
+		if (input == null) {
+			return null;
+		}
+		int bytes = 0;
+		int end = 0;
+		for (int i = 0; i < input.length();) {
+			int codePoint = input.codePointAt(i);
+			int codePointBytes = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+			if (bytes + codePointBytes > maxBytes) {
+				break;
+			}
+			bytes += codePointBytes;
+			end = i + Character.charCount(codePoint);
+			i = end;
+		}
+		return end == input.length() ? input : input.substring(0, end);
 	}
 
 	private MCPConfiguration resolveSessionConfiguration(HTTPRequest request, boolean failOnMissing) {
@@ -2560,6 +3018,272 @@ public class MCPREST {
 		);
 	}
 
+	private void addCustomTools(List<Map<String, Object>> tools, MCPConfiguration configuration) {
+		Set<String> toolNames = new LinkedHashSet<String>();
+		for (String builtInToolName : BUILT_IN_TOOL_NAMES) {
+			toolNames.add(builtInToolName);
+		}
+		for (Map<String, Object> tool : tools) {
+			String name = string(tool.get("name"));
+			if (name != null) {
+				toolNames.add(name);
+			}
+		}
+		for (MCPToolProvider<?> provider : customToolProviders()) {
+			try {
+				MCPToolDefinition definition = provider.getToolDefinition(new MCPToolDefinitionContext(server, configuration));
+				if (definition == null || definition.getName() == null || definition.getName().trim().isEmpty() || toolNames.contains(definition.getName())) {
+					continue;
+				}
+				tools.add(toolDefinitionMap(definition));
+				toolNames.add(definition.getName());
+			}
+			catch (Throwable e) {
+				LOGGER.warn("Could not load custom MCP tool definition from provider {}", provider.getClass().getName(), e);
+			}
+		}
+	}
+
+	private MCPToolProvider<?> findCustomToolProvider(String name, MCPConfiguration configuration) {
+		if (name == null || name.trim().isEmpty()) {
+			return null;
+		}
+		for (MCPToolProvider<?> provider : customToolProviders()) {
+			try {
+				MCPToolDefinition definition = provider.getToolDefinition(new MCPToolDefinitionContext(server, configuration));
+				if (definition != null && name.equals(definition.getName())) {
+					return provider;
+				}
+			}
+			catch (Throwable e) {
+				LOGGER.warn("Could not load custom MCP tool definition from provider {}", provider.getClass().getName(), e);
+			}
+		}
+		return null;
+	}
+
+	private List<MCPToolProvider<?>> customToolProviders() {
+		List<MCPToolProvider<?>> providers = new ArrayList<MCPToolProvider<?>>();
+		try {
+			for (MCPToolProvider<?> provider : ServiceLoader.load(MCPToolProvider.class)) {
+				providers.add(provider);
+			}
+		}
+		catch (Throwable e) {
+			LOGGER.warn("Could not load custom MCP tool providers", e);
+		}
+		return providers;
+	}
+
+	private Map<String, Object> toolDefinitionMap(MCPToolDefinition definition) {
+		Map<String, Object> tool = new LinkedHashMap<String, Object>();
+		tool.put("name", definition.getName());
+		if (definition.getTitle() != null) {
+			tool.put("title", definition.getTitle());
+		}
+		if (definition.getDescription() != null) {
+			tool.put("description", definition.getDescription());
+		}
+		if (definition.getAnnotations() != null && !definition.getAnnotations().isEmpty()) {
+			Map<String, Object> annotations = new LinkedHashMap<String, Object>(definition.getAnnotations());
+			if (definition.isPreviewSupported()) {
+				annotations.put("preview", true);
+			}
+			tool.put("annotations", annotations);
+		}
+		else if (definition.isPreviewSupported()) {
+			Map<String, Object> annotations = new LinkedHashMap<String, Object>();
+			annotations.put("preview", true);
+			tool.put("annotations", annotations);
+		}
+		if (definition.getInputSchema() != null) {
+			tool.put("inputSchema", definition.getInputSchema());
+		}
+		if (definition.getOutputSchema() != null) {
+			tool.put("outputSchema", definition.getOutputSchema());
+		}
+		if (definition.getMeta() != null && !definition.getMeta().isEmpty()) {
+			tool.put("_meta", definition.getMeta());
+		}
+		return tool;
+	}
+
+	private boolean isBuiltInToolName(String name) {
+		for (String builtInToolName : BUILT_IN_TOOL_NAMES) {
+			if (builtInToolName.equals(name)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	private ToolResult customToolResult(MCPToolProvider provider, Map<String, Object> arguments, HTTPRequest request, MCPConfiguration configuration, Map<String, Object> meta, boolean preview) throws Exception {
+		Class<?> inputType = provider.getInputType();
+		Object input = inputType == null || Map.class.isAssignableFrom(inputType)
+			? arguments
+			: bind(arguments, inputType);
+		MCPToolResult result = provider.invoke(input, new MCPToolCallContext(server, request, resolveMcpToken(), header(request, MCP_SESSION_ID), configuration, meta, preview));
+		if (result == null) {
+			return new ToolResult(Collections.emptyMap(), textContent(""), null);
+		}
+		return new ToolResult(
+			result.getStructuredContent(),
+			textContent(result.getContent()),
+			result.getMeta(),
+			result.getIsError(),
+			result.getMessage()
+		);
+	}
+
+	private Token resolveMcpToken() {
+		return server.isAnonymousIsRoot() ? SystemPrincipal.ROOT : null;
+	}
+
+	private void addDocumentationTools(List<Map<String, Object>> tools) {
+		Map<String, Object> searchTool = new LinkedHashMap<String, Object>();
+		searchTool.put("name", SEARCH_DOCUMENTATION_TOOL_NAME);
+		searchTool.put("title", "Search nabu documentation");
+		searchTool.put("description", "Search documentation files under protected/documentation. Match snippets include line numbers. Namespace identifies the documented repository entry; path is relative to namespace.");
+		Map<String, Object> searchInputSchema = new LinkedHashMap<String, Object>();
+		searchInputSchema.put("type", "object");
+		Map<String, Object> searchProperties = new LinkedHashMap<String, Object>();
+		searchProperties.put("pattern", schema("string"));
+		Map<String, Object> glob = propertySchema("array", "Optional glob filters applied to documentation paths.");
+		glob.put("items", schema("string"));
+		searchProperties.put("glob", glob);
+		Map<String, Object> namespace = propertySchema("array", "Optional namespace filters. Matches exact namespaces and descendants.");
+		namespace.put("items", schema("string"));
+		searchProperties.put("namespace", namespace);
+		searchProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
+		searchProperties.put("beforeContext", schema("integer"));
+		searchProperties.put("afterContext", schema("integer"));
+		searchProperties.put("context", schema("integer"));
+		searchProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0)."));
+		searchProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results. Default: 0."));
+		searchInputSchema.put("properties", searchProperties);
+		searchInputSchema.put("required", Arrays.asList("pattern"));
+		searchTool.put("inputSchema", searchInputSchema);
+		searchTool.put("outputSchema", searchOutputSchema());
+		tools.add(searchTool);
+
+		Map<String, Object> findTool = new LinkedHashMap<String, Object>();
+		findTool.put("name", FIND_DOCUMENTATION_TOOL_NAME);
+		findTool.put("title", "Find nabu documentation");
+		findTool.put("description", "Find indexed documentation using namespace and documentation-relative path filters. Results include editable/removable flags.");
+		Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
+		findInputSchema.put("type", "object");
+		Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
+		findProperties.put("pattern", propertySchema("string", "Pattern to match against namespace or documentation path."));
+		findProperties.put("namespace", propertySchema("string", "Optional exact namespace filter."));
+		findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a glob instead of a regex."));
+		findProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0)."));
+		findProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results."));
+		findProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
+		findInputSchema.put("properties", findProperties);
+		findTool.put("inputSchema", findInputSchema);
+		findTool.put("outputSchema", findOutputSchema());
+		tools.add(findTool);
+
+		Map<String, Object> readTool = new LinkedHashMap<String, Object>();
+		readTool.put("name", READ_DOCUMENTATION_TOOL_NAME);
+		readTool.put("title", "Read nabu documentation");
+		readTool.put("description", "Read lines from documentation. Returned content is line-numbered as 'N:content'. Namespace identifies the documented repository entry; path is relative to the namespace.");
+		Map<String, Object> readInputSchema = documentationReadInputSchema(false);
+		readTool.put("inputSchema", readInputSchema);
+		readTool.put("outputSchema", readOutputSchema());
+		tools.add(readTool);
+
+		Map<String, Object> readMultipleTool = new LinkedHashMap<String, Object>();
+		readMultipleTool.put("name", READ_MULTIPLE_DOCUMENTATION_TOOL_NAME);
+		readMultipleTool.put("title", "Read multiple docs");
+		readMultipleTool.put("description", "Read lines from multiple documentation files in one call. Returned content is line-numbered as 'N:content'.");
+		Map<String, Object> readMultipleInputSchema = documentationReadInputSchema(true);
+		readMultipleTool.put("inputSchema", readMultipleInputSchema);
+		readMultipleTool.put("outputSchema", readMultipleOutputSchema());
+		tools.add(readMultipleTool);
+
+		Map<String, Object> editTool = new LinkedHashMap<String, Object>();
+		editTool.put("name", EDIT_DOCUMENTATION_TOOL_NAME);
+		editTool.put("title", "Edit nabu documentation");
+		editTool.put("description", "Replace exact matches in editable documentation under protected/documentation.");
+		Map<String, Object> editInputSchema = new LinkedHashMap<String, Object>();
+		editInputSchema.put("type", "object");
+		Map<String, Object> editProperties = new LinkedHashMap<String, Object>();
+		editProperties.put("namespace", propertySchema("string", "Namespace containing the documentation."));
+		editProperties.put("path", propertySchema("string", "Path relative to protected/documentation."));
+		editProperties.put("edits", editSchema());
+		editInputSchema.put("properties", editProperties);
+		editInputSchema.put("required", Arrays.asList("namespace", "path", "edits"));
+		editTool.put("inputSchema", editInputSchema);
+		editTool.put("outputSchema", editOutputSchema());
+		editTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
+		tools.add(editTool);
+
+		Map<String, Object> writeTool = new LinkedHashMap<String, Object>();
+		writeTool.put("name", WRITE_DOCUMENTATION_TOOL_NAME);
+		writeTool.put("title", "Write nabu documentation");
+		writeTool.put("description", "Overwrite, append, or prepend editable documentation under protected/documentation. Creates files when possible.");
+		Map<String, Object> writeInputSchema = new LinkedHashMap<String, Object>();
+		writeInputSchema.put("type", "object");
+		Map<String, Object> writeProperties = new LinkedHashMap<String, Object>();
+		writeProperties.put("namespace", propertySchema("string", "Namespace containing the documentation."));
+		writeProperties.put("path", propertySchema("string", "Path relative to protected/documentation."));
+		writeProperties.put("content", propertySchema("string", "New documentation content."));
+		Map<String, Object> mode = propertySchema("string", "Write mode. Default: overwrite.");
+		mode.put("enum", Arrays.asList("overwrite", "append", "prepend"));
+		writeProperties.put("mode", mode);
+		writeInputSchema.put("properties", writeProperties);
+		writeInputSchema.put("required", Arrays.asList("namespace", "path", "content"));
+		writeTool.put("inputSchema", writeInputSchema);
+		writeTool.put("outputSchema", writeOutputSchema());
+		writeTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
+		tools.add(writeTool);
+
+		Map<String, Object> deleteTool = new LinkedHashMap<String, Object>();
+		deleteTool.put("name", DELETE_DOCUMENTATION_TOOL_NAME);
+		deleteTool.put("title", "Delete nabu documentation");
+		deleteTool.put("description", "Delete removable documentation under protected/documentation.");
+		Map<String, Object> deleteInputSchema = new LinkedHashMap<String, Object>();
+		deleteInputSchema.put("type", "object");
+		Map<String, Object> deleteProperties = new LinkedHashMap<String, Object>();
+		deleteProperties.put("namespace", propertySchema("string", "Namespace containing the documentation."));
+		deleteProperties.put("path", propertySchema("string", "Path relative to protected/documentation."));
+		deleteInputSchema.put("properties", deleteProperties);
+		deleteInputSchema.put("required", Arrays.asList("namespace", "path"));
+		deleteTool.put("inputSchema", deleteInputSchema);
+		deleteTool.put("outputSchema", writeOutputSchema());
+		deleteTool.put("_meta", buildToolDefinitionMeta(REVIEW_RESOURCE_URI));
+		tools.add(deleteTool);
+	}
+
+	private Map<String, Object> documentationReadInputSchema(boolean multiple) {
+		Map<String, Object> inputSchema = new LinkedHashMap<String, Object>();
+		inputSchema.put("type", "object");
+		Map<String, Object> properties = new LinkedHashMap<String, Object>();
+		Map<String, Object> item = new LinkedHashMap<String, Object>();
+		item.put("type", "object");
+		Map<String, Object> itemProperties = new LinkedHashMap<String, Object>();
+		itemProperties.put("namespace", propertySchema("string", "Namespace containing the documentation."));
+		itemProperties.put("path", propertySchema("string", "Path relative to protected/documentation."));
+		itemProperties.put("startLine", propertySchema("integer", "1-based line number to start reading from. Default: 1."));
+		itemProperties.put("limit", propertySchema("integer", "Maximum number of lines to return (>0). Default: 200."));
+		item.put("properties", itemProperties);
+		item.put("required", Arrays.asList("namespace", "path"));
+		if (multiple) {
+			Map<String, Object> documents = schema("array");
+			documents.put("items", item);
+			properties.put("documents", documents);
+			inputSchema.put("required", Arrays.asList("documents"));
+		}
+		else {
+			properties.putAll(itemProperties);
+			inputSchema.put("required", Arrays.asList("namespace", "path"));
+		}
+		inputSchema.put("properties", properties);
+		return inputSchema;
+	}
+
 	private Map<String, Object> searchOutputSchema() {
 		Map<String, Object> schema = new LinkedHashMap<String, Object>();
 		schema.put("type", "object");
@@ -2630,7 +3354,11 @@ public class MCPREST {
 		properties.put("startLine", schema("integer"));
 		properties.put("count", schema("integer"));
 		properties.put("total", schema("integer"));
-		properties.put("content", schema("string"));
+		properties.put("content", propertySchema("string", "Line-numbered text with format 'N:content'."));
+		properties.put("truncated", schema("boolean"));
+		Map<String, Object> truncatedReason = schema("array");
+		truncatedReason.put("items", schema("string"));
+		properties.put("truncated_reason", truncatedReason);
 		properties.put("code", schema("string"));
 		schema.put("properties", properties);
 		return schema;

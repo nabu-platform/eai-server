@@ -76,6 +76,7 @@ import be.nabu.eai.repository.logger.NabuLogAppender;
 import be.nabu.eai.repository.util.CombinedAuthenticator;
 import be.nabu.eai.repository.util.NodeUtils;
 import be.nabu.eai.repository.util.SystemPrincipal;
+import be.nabu.eai.server.documentation.DocumentationCatalogService;
 import be.nabu.eai.server.api.ServerListener;
 import be.nabu.eai.server.api.ServerListener.Phase;
 import be.nabu.eai.server.fragments.FileSystemFragmentIndexBackend;
@@ -189,6 +190,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	private Appender<ILoggingEvent> appender;
 	private List<ServerListener> serverListeners;
 	private FragmentIndexService fragmentIndexService;
+	private DocumentationCatalogService documentationCatalogService;
 	private HTTPServer httpServer;
 	private Thread queueExecutionThread;
 	private ExecutorService pool;
@@ -1108,6 +1110,10 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		return fragmentIndexService;
 	}
 
+	public DocumentationCatalogService getDocumentationCatalogService() {
+		return documentationCatalogService;
+	}
+
 	@Override
 	public Future<ServiceResult> run(Service service, ExecutionContext executionContext, ComplexContent input, ServiceRunnableObserver...observers) {
 		List<ServiceRunnableObserver> allObservers = new ArrayList<ServiceRunnableObserver>(observers.length + 1);
@@ -1740,10 +1746,13 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	
 	private void initializeFragmentIndexService() {
 		if (!enableMCP) {
-			logger.info("MCP disabled, fragment indexing is disabled");
+			logger.info("MCP disabled, fragment indexing and documentation catalog are disabled");
 			fragmentIndexService = null;
+			documentationCatalogService = null;
 			return;
 		}
+		documentationCatalogService = new DocumentationCatalogService(repository);
+		documentationCatalogService.rebuild();
 		String dataSourceId = System.getProperty("be.nabu.eai.server.fragments.datasource");
 		if (dataSourceId != null && !dataSourceId.trim().isEmpty()) {
 			Artifact resolved = repository.resolve(dataSourceId);

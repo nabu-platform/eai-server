@@ -80,18 +80,43 @@ public class FragmentIndexService {
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private void index(String artifactId, Node node) {
+		Artifact artifact;
 		try {
-			Artifact artifact = node.getArtifact();
-			ArtifactFragmentManager manager = EAIRepositoryUtils.getArtifactFragmentManager(artifact);
-			if (manager == null) {
-				backend.delete(artifactId);
-				return;
-			}
-			List<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment> fragments = new ArrayList<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment>(manager.listFragments(artifact));
+			artifact = node.getArtifact();
+		}
+		catch (Exception | StackOverflowError e) {
+			logger.error("Could not load artifact for fragment indexing: " + artifactId + " with artifact manager: " + node.getArtifactManager(), e);
+			backend.delete(artifactId);
+			return;
+		}
+		ArtifactFragmentManager manager;
+		try {
+			manager = EAIRepositoryUtils.getArtifactFragmentManager(artifact);
+		}
+		catch (Exception | StackOverflowError e) {
+			logger.error("Could not resolve fragment manager for artifact: " + artifactId + " with artifact class: " + artifact.getClass().getName(), e);
+			backend.delete(artifactId);
+			return;
+		}
+		if (manager == null) {
+			backend.delete(artifactId);
+			return;
+		}
+		List<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment> fragments;
+		try {
+			fragments = new ArrayList<be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment>(manager.listFragments(artifact));
+		}
+		catch (Exception | StackOverflowError e) {
+			logger.error("Could not list fragments for artifact: " + artifactId + " with fragment manager: " + manager.getClass().getName(), e);
+			backend.delete(artifactId);
+			return;
+		}
+		try {
 			backend.index(artifactId, manager.getArtifactType(), manager.getArtifactCategory(), node.getVersion(), fragments);
 		}
-		catch (Exception e) {
-			logger.error("Could not index fragments for artifact: " + artifactId, e);
+		catch (Exception | StackOverflowError e) {
+			logger.error("Could not store fragments for artifact: " + artifactId + " with fragment manager: " + manager.getClass().getName(), e);
+			backend.delete(artifactId);
 		}
 	}
 }
