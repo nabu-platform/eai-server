@@ -141,6 +141,50 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
+	public FragmentSearch get(String artifactId, String path) {
+		List<FragmentSearch> fragments = get(Collections.singletonList(artifactId), Collections.singletonList(path));
+		return fragments.isEmpty() ? null : fragments.get(0);
+	}
+
+	@Override
+	public List<FragmentSearch> get(List<String> artifactIds, List<String> paths) {
+		List<String> filteredArtifactIds = filterValues(artifactIds);
+		List<String> filteredPaths = filterValues(paths);
+		if (filteredArtifactIds.isEmpty() || filteredPaths.isEmpty()) {
+			return Collections.emptyList();
+		}
+		Connection connection = null;
+		PreparedStatement statement = null;
+		ResultSet resultSet = null;
+		try {
+			connection = dataSource.getConnection();
+			StringBuilder sql = new StringBuilder("select artifact_id, path, artifact_type, artifact_category, fragment_type, content, content_type, properties, editable, removable from fragment_index where artifact_id in (" + placeholders(filteredArtifactIds.size()) + ") and path in (" + placeholders(filteredPaths.size()) + ") order by artifact_id, path");
+			statement = connection.prepareStatement(sql.toString());
+			int parameter = 1;
+			for (String artifactId : filteredArtifactIds) {
+				statement.setString(parameter++, artifactId);
+			}
+			for (String path : filteredPaths) {
+				statement.setString(parameter++, path);
+			}
+			resultSet = statement.executeQuery();
+			List<FragmentSearch> results = new ArrayList<FragmentSearch>();
+			while (resultSet.next()) {
+				results.add(mapFragment(resultSet, Collections.<String>emptyList()));
+			}
+			return results;
+		}
+		catch (SQLException e) {
+			throw new RuntimeException(e);
+		}
+		finally {
+			close(resultSet);
+			close(statement);
+			close(connection);
+		}
+	}
+
+	@Override
 	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
 		Connection connection = null;
 		PreparedStatement statement = null;
@@ -215,7 +259,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 			resultSet = statement.executeQuery();
 			List<FragmentSearch> results = new ArrayList<FragmentSearch>();
 			while (resultSet.next()) {
-				results.add(new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), resultSet.getString("artifact_category"), resultSet.getString("fragment_type"), resultSet.getString("content"), resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), Collections.<String>emptyList(), resultSet.getBoolean("editable"), resultSet.getBoolean("removable")));
+				results.add(mapFragment(resultSet, Collections.<String>emptyList()));
 			}
 			return results;
 		}
@@ -314,7 +358,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 				String content = resultSet.getString("content");
 				List<String> matches = RipgrepFormatter.format(content, compiled, before, after);
 				if (!matches.isEmpty()) {
-					results.add(new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), resultSet.getString("artifact_category"), resultSet.getString("fragment_type"), content, resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), matches, resultSet.getBoolean("editable"), resultSet.getBoolean("removable")));
+					results.add(mapFragment(resultSet, matches, content));
 					if (limit > 0 && results.size() >= limit) {
 						break;
 					}
@@ -382,6 +426,14 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		finally {
 			close(delete);
 		}
+	}
+
+	private FragmentSearch mapFragment(ResultSet resultSet, List<String> matches) throws SQLException {
+		return mapFragment(resultSet, matches, resultSet.getString("content"));
+	}
+
+	private FragmentSearch mapFragment(ResultSet resultSet, List<String> matches, String content) throws SQLException {
+		return new FragmentSearch(resultSet.getString("artifact_id"), resultSet.getString("path"), resultSet.getString("artifact_type"), resultSet.getString("artifact_category"), resultSet.getString("fragment_type"), content, resultSet.getString("content_type"), deserializeProperties(resultSet.getString("properties")), matches, resultSet.getBoolean("editable"), resultSet.getBoolean("removable"));
 	}
 
 	private List<String> filterValues(List<String> values) {

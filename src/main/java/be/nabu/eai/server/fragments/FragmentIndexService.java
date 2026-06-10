@@ -58,6 +58,14 @@ public class FragmentIndexService {
 		}
 	}
 
+	public FragmentSearch get(String artifactId, String path) {
+		return backend.get(artifactId, path);
+	}
+
+	public List<FragmentSearch> get(List<String> artifactIds, List<String> paths) {
+		return backend.get(artifactIds, paths);
+	}
+
 	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
 		return backend.list(globs, namespaces, artifactTypes, artifactCategories);
 	}

@@ -322,15 +322,15 @@ public class MCPREST {
 			Map<String, Object> findTool = new LinkedHashMap<String, Object>();
 			findTool.put("name", FIND_TOOL_NAME);
 			findTool.put("title", "Find nabu artifact fragments");
-			findTool.put("description", "Find indexed nabu artifact fragments using path and artifact filters. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
+			findTool.put("description", "Find indexed nabu artifact fragments using path and artifact filters. The optional pattern is a full-match regex by default, not a contains search. For substring matching use .*text.* or set glob=true and use *text*. Returned fragments are not normal files and may only be manipulated with the nabu artifact fragment tools, not standard file tools.");
 			Map<String, Object> findAnnotations = new LinkedHashMap<String, Object>();
 			findAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
-			findAnnotations.put("intentTemplate", "Find artifact fragments [matching {pattern}] [in artifact {artifactId}] [limit {limit}]");
+			findAnnotations.put("intentTemplate", "Find artifact fragments [matching full regex/glob {pattern}] [in artifact {artifactId}] [limit {limit}]");
 			findTool.put("annotations", findAnnotations);
 			Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
 			findInputSchema.put("type", "object");
 			Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
-			findProperties.put("pattern", propertySchema("string", "Pattern to match against fragment paths or artifact ids."));
+			findProperties.put("pattern", propertySchema("string", "Optional full-match regex applied to fragment paths or artifact ids, not a contains search. To match a substring use .*text.*. When glob=true, use glob syntax such as *text*."));
 			findProperties.put("artifactId", propertySchema("string", "Optional artifact id filter."));
 			Map<String, Object> findNamespace = propertySchema("array", "Optional artifact namespace filters. Matches the exact namespace and all descendant artifact ids. Configured and policy namespaces are applied first; this argument can only narrow further.");
 			findNamespace.put("items", schema("string"));
@@ -345,7 +345,7 @@ public class MCPREST {
 			findArtifactCategoryItem.put("enum", listAvailableArtifactCategories());
 			findArtifactCategory.put("items", findArtifactCategoryItem);
 			findProperties.put("artifactCategory", findArtifactCategory);
-			findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a glob instead of a regex."));
+			findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a full-match glob instead of a regex. For substring matching with glob use *text*."));
 			findProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0)."));
 			findProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results."));
 			findProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
@@ -356,7 +356,7 @@ public class MCPREST {
 			Map<String, Object> readTool = new LinkedHashMap<String, Object>();
 			readTool.put("name", READ_TOOL_NAME);
 			readTool.put("title", "Read nabu artifact fragment");
-			readTool.put("description", "Read lines from an indexed nabu artifact fragment. Returned content is line-numbered as 'N:content'.");
+			readTool.put("description", "Read lines from an indexed nabu artifact fragment. Returned content is raw text.");
 			Map<String, Object> readAnnotations = new LinkedHashMap<String, Object>();
 			readAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			readAnnotations.put("intentTemplate", "Read artifact {artifactId} fragment {path} [from line {startLine}] [limit {limit}]");
@@ -376,7 +376,7 @@ public class MCPREST {
 			Map<String, Object> readMultipleTool = new LinkedHashMap<String, Object>();
 			readMultipleTool.put("name", READ_MULTIPLE_TOOL_NAME);
 			readMultipleTool.put("title", "Read multiple nabu artifact fragments");
-			readMultipleTool.put("description", "Read lines from multiple indexed nabu artifact fragments in one call. Returned content is line-numbered as 'N:content'. Results may be truncated to avoid excessive output.");
+			readMultipleTool.put("description", "Read lines from multiple indexed nabu artifact fragments in one call. Returned content is raw text. Results may be truncated to avoid excessive output.");
 			Map<String, Object> readMultipleAnnotations = new LinkedHashMap<String, Object>();
 			readMultipleAnnotations.put("scopes", Arrays.asList("read:nabu:artifact"));
 			readMultipleAnnotations.put("intentTemplate", "Read multiple artifact fragments");
@@ -750,6 +750,8 @@ public class MCPREST {
 			((FeaturedExecutionContext) executionContext).getEnabledFeatures().addAll(features);
 		}
 		String serviceContext = string(arguments.get("serviceContext"));
+		String requestedRunAs = string(arguments.get("runAs"));
+		String requestedRunAsRealm = string(arguments.get("runAsRealm"));
 		Map<String, Object> previousGlobalContext = ServiceRuntime.getGlobalContext();
 		TraceRun traceRun = null;
 		Instant started = Instant.now();
@@ -757,6 +759,12 @@ public class MCPREST {
 			ServiceRuntime.setGlobalContext(new LinkedHashMap<String, Object>());
 			ServiceRuntime.getGlobalContext().put("service.context", serviceContext == null || serviceContext.trim().isEmpty() ? serviceId : serviceContext);
 			ServiceRuntime.getGlobalContext().put("service.source", "mcp.invoke");
+			if (requestedRunAs != null && !requestedRunAs.trim().isEmpty()) {
+				ServiceRuntime.getGlobalContext().put("mcp.requestedRunAs", requestedRunAs.trim());
+				if (requestedRunAsRealm != null && !requestedRunAsRealm.trim().isEmpty()) {
+					ServiceRuntime.getGlobalContext().put("mcp.requestedRunAsRealm", requestedRunAsRealm.trim());
+				}
+			}
 			if (asBoolean(arguments.get("trace"))) {
 				traceRun = TraceRun.start(server.getRepository(), service);
 				if (executionContext.getServiceContext().getServiceTrackerProvider() instanceof be.nabu.eai.repository.api.ModifiableServiceRuntimeTrackerProvider) {
@@ -1505,8 +1513,7 @@ public class MCPREST {
 					truncatedReason.add("long_lines");
 				}
 			}
-			String lineContent = (i + 1) + ":" + line;
-			String formatted = builder.length() == 0 ? lineContent : "\n" + lineContent;
+			String formatted = builder.length() == 0 ? line : "\n" + line;
 			int formattedBytes = formatted.getBytes(StandardCharsets.UTF_8).length;
 			if (totalBytes + formattedBytes > MAX_READ_BYTES) {
 				truncated = true;
@@ -1644,8 +1651,7 @@ public class MCPREST {
 					update.put("error", buildValidationMessage(validations));
 				}
 				else {
-					reloadArtifactAfterMcpUpdate(artifactId);
-					notifyCollaborationReload(artifactId);
+					reloadArtifactAfterMcpUpdate(currentManager, artifactId, path);
 					successCount = 1;
 				}
 			}
@@ -1749,7 +1755,7 @@ public class MCPREST {
 			}
 			manager.createArtifact(parent, name);
 			String artifactId = parent.getId() + "." + name;
-			reloadArtifactAfterMcpUpdate(parent.getId());
+			reloadArtifactAfterMcpCreate(parent.getId());
 			notifyCollaborationCreate(artifactId);
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("code", "CREATED");
@@ -1789,7 +1795,7 @@ public class MCPREST {
 			newEntry.setCollection(collection);
 			newEntry.saveCollection();
 			root.refresh(true);
-			reloadArtifactAfterMcpUpdate(newEntry.getId());
+			reloadArtifactAfterMcpCreate(newEntry.getId());
 			notifyCollaborationCreate(newEntry.getId());
 			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 			structuredContent.put("code", "CREATED");
@@ -1817,15 +1823,30 @@ public class MCPREST {
 		if (fragments.size() > MAX_MULTI_READ_FRAGMENTS) {
 			throw protocolError("TOO_MANY_FRAGMENTS", "Argument 'fragments' may contain at most " + MAX_MULTI_READ_FRAGMENTS + " fragment requests.");
 		}
-		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
-		int totalBytes = 0;
-		boolean truncated = false;
+		List<Map<String, Object>> requests = new ArrayList<Map<String, Object>>();
+		List<String> artifactIds = new ArrayList<String>();
+		List<String> paths = new ArrayList<String>();
 		for (Object object : fragments) {
 			Map<String, Object> fragment = map(object);
 			if (fragment == null) {
 				throw protocolError("INVALID_FRAGMENT", "Each entry in 'fragments' must be an object.");
 			}
-			Map<String, Object> result = readArtifact(fragment, namespaces);
+			String artifactId = requiredString(fragment, "artifactId", "MISSING_ARTIFACT_ID");
+			String path = requiredString(fragment, "path", "MISSING_PATH");
+			requests.add(fragment);
+			if (!artifactIds.contains(artifactId)) {
+				artifactIds.add(artifactId);
+			}
+			if (!paths.contains(path)) {
+				paths.add(path);
+			}
+		}
+		Map<String, FragmentSearch> indexedFragments = indexFragments(getIndexedFragments(artifactIds, paths, namespaces));
+		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+		int totalBytes = 0;
+		boolean truncated = false;
+		for (Map<String, Object> request : requests) {
+			Map<String, Object> result = readArtifact(request, indexedFragments);
 			String fragmentContent = string(result.get("content"));
 			int fragmentBytes = fragmentContent == null ? 0 : fragmentContent.getBytes(StandardCharsets.UTF_8).length;
 			if (!results.isEmpty() && totalBytes + fragmentBytes > MAX_MULTI_READ_BYTES) {
@@ -1847,6 +1868,22 @@ public class MCPREST {
 	private Map<String, Object> readArtifact(Map<String, Object> arguments, List<String> namespaces) {
 		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
 		String path = requiredString(arguments, "path", "MISSING_PATH");
+		return readArtifact(arguments, getIndexedFragment(artifactId, path, namespaces));
+	}
+
+	private Map<String, Object> readArtifact(Map<String, Object> arguments, Map<String, FragmentSearch> indexedFragments) {
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
+		FragmentSearch fragment = indexedFragments.get(fragmentKey(artifactId, path));
+		if (fragment == null) {
+			throw protocolError("INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'.");
+		}
+		return readArtifact(arguments, fragment);
+	}
+
+	private Map<String, Object> readArtifact(Map<String, Object> arguments, FragmentSearch fragment) {
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		String path = requiredString(arguments, "path", "MISSING_PATH");
 		int startLine = integer(arguments.get("startLine"), 1);
 		int limit = integer(arguments.get("limit"), 200);
 		if (startLine <= 0) {
@@ -1855,7 +1892,6 @@ public class MCPREST {
 		if (limit <= 0) {
 			throw protocolError("INVALID_LIMIT", "Argument 'limit' must be a positive integer.");
 		}
-		FragmentSearch fragment = getIndexedFragment(artifactId, path, namespaces);
 		String content = fragment.getContent() == null ? "" : fragment.getContent();
 		Map<String, Object> structuredContent = readLines(content, path, startLine, limit);
 		structuredContent.put("artifactId", artifactId);
@@ -1898,9 +1934,10 @@ public class MCPREST {
 				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support dynamic fragment creation.");
 			}
 			List<Validation<?>> validations = dynamicManager.createFragment(currentArtifact, path, content);
-			reloadArtifactAfterMcpUpdate(artifactId);
-			notifyCollaborationReload(artifactId);
 			boolean isError = hasErrors(validations);
+			if (!isError) {
+				reloadArtifactAfterMcpUpdate(dynamicManager, artifactId, path);
+			}
 			String message = buildValidationMessage(validations);
 			structuredContent.put("code", isError ? "CREATE_FAILED" : "CREATED");
 			structuredContent.put("isError", isError);
@@ -1953,9 +1990,10 @@ public class MCPREST {
 				throw protocolError("INVALID_PATH", "Artifact '" + artifactId + "' does not support dynamic fragment deletion.");
 			}
 			List<Validation<?>> validations = dynamicManager.deleteFragment(currentArtifact, path);
-			reloadArtifactAfterMcpUpdate(artifactId);
-			notifyCollaborationReload(artifactId);
 			boolean isError = hasErrors(validations);
+			if (!isError) {
+				reloadArtifactAfterMcpUpdate(dynamicManager, artifactId, path);
+			}
 			String message = buildValidationMessage(validations);
 			structuredContent.put("code", isError ? "DELETE_FAILED" : "DELETED");
 			structuredContent.put("isError", isError);
@@ -2039,8 +2077,7 @@ public class MCPREST {
 					update.put("error", buildValidationMessage(validations));
 				}
 				else {
-					reloadArtifactAfterMcpUpdate(artifactId);
-					notifyCollaborationReload(artifactId);
+					reloadArtifactAfterMcpUpdate(currentManager, artifactId, path);
 				}
 			}
 			catch (Exception e) {
@@ -2066,8 +2103,20 @@ public class MCPREST {
 		return new EditArtifactResult(structuredContent, REVIEW_RESOURCE_URI, Boolean.valueOf(isError), message);
 	}
 
+	private void reloadArtifactAfterMcpUpdate(ArtifactFragmentManager<?> manager, String artifactId, String fragment) {
+		if (manager.shouldReloadAfterChange(fragment)) {
+			reloadArtifactAfterMcpUpdate(artifactId);
+			notifyCollaborationReload(artifactId);
+		}
+	}
+
 	private void reloadArtifactAfterMcpUpdate(String artifactId) {
-		server.getRepository().reload(artifactId, false);
+		EAIResourceRepository.getInstance().reload(artifactId, false, false);
+		reloadDependenciesAfterMcpUpdate(artifactId);
+	}
+
+	private void reloadArtifactAfterMcpCreate(String artifactId) {
+		EAIResourceRepository.getInstance().reload(artifactId, false, true);
 		reloadDependenciesAfterMcpUpdate(artifactId);
 	}
 
@@ -3170,13 +3219,13 @@ public class MCPREST {
 		Map<String, Object> findTool = new LinkedHashMap<String, Object>();
 		findTool.put("name", FIND_DOCUMENTATION_TOOL_NAME);
 		findTool.put("title", "Find nabu documentation");
-		findTool.put("description", "Find indexed documentation using namespace and documentation-relative path filters. Results include editable/removable flags.");
+		findTool.put("description", "Find indexed documentation using namespace and documentation-relative path filters. The optional pattern is a full-match regex by default, not a contains search. For substring matching use .*text.* or set glob=true and use *text*. Results include editable/removable flags.");
 		Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
 		findInputSchema.put("type", "object");
 		Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
-		findProperties.put("pattern", propertySchema("string", "Pattern to match against namespace or documentation path."));
+		findProperties.put("pattern", propertySchema("string", "Optional full-match regex applied to the namespace or documentation path, not a contains search. To match a substring use .*text.*. When glob=true, use glob syntax such as *text*."));
 		findProperties.put("namespace", propertySchema("string", "Optional exact namespace filter."));
-		findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a glob instead of a regex."));
+		findProperties.put("glob", propertySchema("boolean", "If true, interpret pattern as a full-match glob instead of a regex. For substring matching with glob use *text*."));
 		findProperties.put("limit", propertySchema("integer", "Maximum number of results to return (>0)."));
 		findProperties.put("offset", propertySchema("integer", "Number of matching results to skip before returning results."));
 		findProperties.put("caseSensitive", propertySchema("boolean", "Whether matching is case-sensitive. Defaults to false when omitted."));
@@ -3188,7 +3237,7 @@ public class MCPREST {
 		Map<String, Object> readTool = new LinkedHashMap<String, Object>();
 		readTool.put("name", READ_DOCUMENTATION_TOOL_NAME);
 		readTool.put("title", "Read nabu documentation");
-		readTool.put("description", "Read lines from documentation. Returned content is line-numbered as 'N:content'. Namespace identifies the documented repository entry; path is relative to the namespace.");
+		readTool.put("description", "Read lines from documentation. Returned content is raw text. Namespace identifies the documented repository entry; path is relative to the namespace.");
 		Map<String, Object> readInputSchema = documentationReadInputSchema(false);
 		readTool.put("inputSchema", readInputSchema);
 		readTool.put("outputSchema", readOutputSchema());
@@ -3197,7 +3246,7 @@ public class MCPREST {
 		Map<String, Object> readMultipleTool = new LinkedHashMap<String, Object>();
 		readMultipleTool.put("name", READ_MULTIPLE_DOCUMENTATION_TOOL_NAME);
 		readMultipleTool.put("title", "Read multiple docs");
-		readMultipleTool.put("description", "Read lines from multiple documentation files in one call. Returned content is line-numbered as 'N:content'.");
+		readMultipleTool.put("description", "Read lines from multiple documentation files in one call. Returned content is raw text.");
 		Map<String, Object> readMultipleInputSchema = documentationReadInputSchema(true);
 		readMultipleTool.put("inputSchema", readMultipleInputSchema);
 		readMultipleTool.put("outputSchema", readMultipleOutputSchema());
@@ -3354,7 +3403,7 @@ public class MCPREST {
 		properties.put("startLine", schema("integer"));
 		properties.put("count", schema("integer"));
 		properties.put("total", schema("integer"));
-		properties.put("content", propertySchema("string", "Line-numbered text with format 'N:content'."));
+		properties.put("content", propertySchema("string", "Raw text content for the requested line range."));
 		properties.put("truncated", schema("boolean"));
 		Map<String, Object> truncatedReason = schema("array");
 		truncatedReason.put("items", schema("string"));
@@ -3464,7 +3513,11 @@ public class MCPREST {
 		if (runAs == null || runAs.trim().isEmpty()) {
 			return server.isAnonymousIsRoot() ? SystemPrincipal.ROOT : null;
 		}
-		return new ImpersonateToken(null, string(arguments.get("runAsRealm")), runAs);
+		String runAsRealm = string(arguments.get("runAsRealm"));
+		if (runAsRealm == null || runAsRealm.trim().isEmpty()) {
+			return server.isAnonymousIsRoot() ? SystemPrincipal.ROOT : null;
+		}
+		return new ImpersonateToken(null, runAsRealm.trim(), runAs.trim());
 	}
 
 	private String buildInvokeSummaryText(Map<String, Object> structuredContent) {
@@ -3858,18 +3911,53 @@ public class MCPREST {
 		return builder.toString();
 	}
 
-	private FragmentSearch getIndexedFragment(String artifactId, String path, List<String> namespaces) {
+	private List<FragmentSearch> getIndexedFragments(List<String> artifactIds, List<String> paths, List<String> namespaces) {
 		FragmentIndexService service = server.getFragmentIndexService();
 		if (service == null) {
 			throw new HTTPException(503, "The fragment index service is unavailable.");
 		}
-		List<FragmentSearch> fragments = service.list(null, namespaces, null, null);
+		List<FragmentSearch> fragments = service.get(artifactIds, paths);
+		List<FragmentSearch> allowed = new ArrayList<FragmentSearch>();
+		for (FragmentSearch fragment : fragments) {
+			if (matchesNamespace(namespaces, fragment.getArtifactId())) {
+				allowed.add(fragment);
+			}
+		}
+		return allowed;
+	}
+
+	private FragmentSearch getIndexedFragment(String artifactId, String path, List<String> namespaces) {
+		List<FragmentSearch> fragments = getIndexedFragments(Collections.singletonList(artifactId), Collections.singletonList(path), namespaces);
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId.equals(fragment.getArtifactId()) && path.equals(fragment.getPath())) {
 				return fragment;
 			}
 		}
 		throw protocolError("INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'.");
+	}
+
+	private Map<String, FragmentSearch> indexFragments(List<FragmentSearch> fragments) {
+		Map<String, FragmentSearch> indexed = new LinkedHashMap<String, FragmentSearch>();
+		for (FragmentSearch fragment : fragments) {
+			indexed.put(fragmentKey(fragment.getArtifactId(), fragment.getPath()), fragment);
+		}
+		return indexed;
+	}
+
+	private String fragmentKey(String artifactId, String path) {
+		return artifactId + "\n" + path;
+	}
+
+	private boolean matchesNamespace(List<String> namespaces, String artifactId) {
+		if (namespaces == null || namespaces.isEmpty()) {
+			return true;
+		}
+		for (String namespace : namespaces) {
+			if (artifactId.equals(namespace) || artifactId.startsWith(namespace + ".")) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private int integer(Object value, int defaultValue) {

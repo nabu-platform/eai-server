@@ -156,6 +156,41 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
+	public FragmentSearch get(String artifactId, String path) {
+		List<FragmentSearch> fragments = get(Collections.singletonList(artifactId), Collections.singletonList(path));
+		return fragments.isEmpty() ? null : fragments.get(0);
+	}
+
+	@Override
+	public List<FragmentSearch> get(List<String> artifactIds, List<String> paths) {
+		List<String> filteredArtifactIds = filterValues(artifactIds);
+		List<String> filteredPaths = filterValues(paths);
+		if (filteredArtifactIds.isEmpty() || filteredPaths.isEmpty()) {
+			return Collections.emptyList();
+		}
+		try {
+			List<FragmentSearch> results = new ArrayList<FragmentSearch>();
+			for (String artifactId : filteredArtifactIds) {
+				Path artifactRoot = artifactRoot(artifactId);
+				for (String path : filteredPaths) {
+					Path file = artifactRoot.resolve(path);
+					if (!Files.isRegularFile(file)) {
+						continue;
+					}
+					FragmentSearch fragment = toFragmentSearch(file, artifactRoot, null);
+					if (fragment != null) {
+						results.add(fragment);
+					}
+				}
+			}
+			return results;
+		}
+		catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	@Override
 	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
 		try {
 			List<Path> files = new ArrayList<Path>();
@@ -290,32 +325,40 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		List<FragmentSearch> results = new ArrayList<FragmentSearch>();
 		for (Path file : files) {
 			Path artifactRoot = resolveArtifactRoot(file);
-			Map<String, String> fragment = loadProperties(propertiesFile(file));
-			Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
-			properties.remove("hash");
-			properties.remove("artifactType");
-			properties.remove("artifactCategory");
-			properties.remove("fragmentType");
-			properties.remove("contentType");
-			properties.remove("editable");
-			properties.remove("removable");
-			String artifactId = decodeArtifactId(artifactRoot.getFileName().toString());
-			String path = relativizeFragment(artifactRoot, file);
-			if (!matchesNamespace(namespaces, artifactId)) {
+			FragmentSearch fragment = toFragmentSearch(file, artifactRoot, null);
+			if (fragment == null) {
 				continue;
 			}
-			if (!matchesGlob(globs, artifactId, path)) {
+			if (!matchesNamespace(namespaces, fragment.getArtifactId())) {
 				continue;
 			}
-			if (!artifactTypes.isEmpty() && !artifactTypes.contains(fragment.get("artifactType"))) {
+			if (!matchesGlob(globs, fragment.getArtifactId(), fragment.getPath())) {
 				continue;
 			}
-			if (!artifactCategories.isEmpty() && !artifactCategories.contains(fragment.get("artifactCategory"))) {
+			if (!artifactTypes.isEmpty() && !artifactTypes.contains(fragment.getArtifactType())) {
 				continue;
 			}
-			results.add(new FragmentSearch(artifactId, path, fragment.get("artifactType"), fragment.get("artifactCategory"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, Collections.<String>emptyList(), Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable"))));
+			if (!artifactCategories.isEmpty() && !artifactCategories.contains(fragment.getArtifactCategory())) {
+				continue;
+			}
+			results.add(fragment);
 		}
 		return results;
+	}
+
+	private FragmentSearch toFragmentSearch(Path file, Path artifactRoot, List<String> matches) throws IOException {
+		Map<String, String> fragment = loadProperties(propertiesFile(file));
+		Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
+		properties.remove("hash");
+		properties.remove("artifactType");
+		properties.remove("artifactCategory");
+		properties.remove("fragmentType");
+		properties.remove("contentType");
+		properties.remove("editable");
+		properties.remove("removable");
+		String artifactId = decodeArtifactId(artifactRoot.getFileName().toString());
+		String path = relativizeFragment(artifactRoot, file);
+		return new FragmentSearch(artifactId, path, fragment.get("artifactType"), fragment.get("artifactCategory"), fragment.get("fragmentType"), Files.readString(file, StandardCharsets.UTF_8), fragment.get("contentType"), properties, matches == null ? Collections.<String>emptyList() : matches, Boolean.parseBoolean(fragment.get("editable")), Boolean.parseBoolean(fragment.get("removable")));
 	}
 
 	private boolean matchesGlob(List<String> globs, String artifactId, String path) {
