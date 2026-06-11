@@ -49,6 +49,7 @@ import be.nabu.eai.repository.util.SystemPrincipal;
 import be.nabu.eai.repository.api.ArtifactFragmentManager.ArtifactFragment;
 import be.nabu.eai.repository.api.ExtensibleEntry;
 import be.nabu.eai.repository.api.Node;
+import be.nabu.eai.repository.api.ResourceEntry;
 import be.nabu.libs.artifacts.api.Artifact;
 import be.nabu.libs.authentication.impl.ImpersonateToken;
 import be.nabu.eai.repository.resources.RepositoryEntry;
@@ -78,6 +79,7 @@ import be.nabu.libs.services.api.ServiceResult;
 import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPRequest;
+import be.nabu.libs.resources.api.ManageableContainer;
 import be.nabu.libs.types.api.ComplexContent;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
@@ -169,6 +171,7 @@ public class MCPREST {
 	private static final String WRITE_DOCUMENTATION_TOOL_NAME = "write_nabu_documentation";
 	private static final String DELETE_DOCUMENTATION_TOOL_NAME = "delete_nabu_documentation";
 	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
+	private static final String DELETE_TOOL_NAME = "delete_nabu_artifact";
 	private static final String MOVE_TOOL_NAME = "move_nabu_artifact";
 	private static final String CREATE_PROJECT_TOOL_NAME = "create_nabu_project";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
@@ -204,6 +207,7 @@ public class MCPREST {
 		WRITE_DOCUMENTATION_TOOL_NAME,
 		DELETE_DOCUMENTATION_TOOL_NAME,
 		CREATE_TOOL_NAME,
+		DELETE_TOOL_NAME,
 		MOVE_TOOL_NAME,
 		CREATE_PROJECT_TOOL_NAME,
 		SKILLS_TOOL_NAME,
@@ -515,6 +519,22 @@ public class MCPREST {
 				tools.add(createTool);
 				createTool.put("inputSchema", createInputSchema);
 			}
+			Map<String, Object> deleteTool = new LinkedHashMap<String, Object>();
+			deleteTool.put("name", DELETE_TOOL_NAME);
+			deleteTool.put("title", "Delete nabu artifact");
+			deleteTool.put("description", "Delete an existing nabu artifact by artifact id.");
+			Map<String, Object> deleteAnnotations = new LinkedHashMap<String, Object>();
+			deleteAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+			deleteAnnotations.put("intentTemplate", "Deleting {artifactId}");
+			deleteTool.put("annotations", deleteAnnotations);
+			Map<String, Object> deleteInputSchema = new LinkedHashMap<String, Object>();
+			deleteInputSchema.put("type", "object");
+			Map<String, Object> deleteProperties = new LinkedHashMap<String, Object>();
+			deleteProperties.put("artifactId", propertySchema("string", "Artifact id to delete."));
+			deleteInputSchema.put("properties", deleteProperties);
+			deleteInputSchema.put("required", Arrays.asList("artifactId"));
+			deleteTool.put("inputSchema", deleteInputSchema);
+			tools.add(deleteTool);
 			Map<String, Object> moveTool = new LinkedHashMap<String, Object>();
 			moveTool.put("name", MOVE_TOOL_NAME);
 			moveTool.put("title", "Move nabu artifact");
@@ -691,6 +711,9 @@ public class MCPREST {
 				}
 				else if (CREATE_TOOL_NAME.equals(name)) {
 					toolResult = createToolResult(arguments, meta, configuration);
+				}
+				else if (DELETE_TOOL_NAME.equals(name)) {
+					toolResult = deleteToolResult(arguments, meta, configuration);
 				}
 				else if (MOVE_TOOL_NAME.equals(name)) {
 					toolResult = moveToolResult(arguments, meta, configuration);
@@ -1241,6 +1264,12 @@ public class MCPREST {
 		Map<String, Object> structuredContent = createProject(arguments);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateProjectDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
+	}
+
+	private ToolResult deleteToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		Map<String, Object> structuredContent = deleteArtifact(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildDeleteDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
 	}
 
 	private ToolResult moveToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
@@ -1805,6 +1834,53 @@ public class MCPREST {
 		}
 	}
 
+	private Map<String, Object> deleteArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
+		if (!isAllowedNamespace(artifactId, namespaces)) {
+			return createErrorResult("INVALID_PATH", "Artifact deletion must stay within the allowed namespaces.");
+		}
+		EAIResourceRepository repository = EAIResourceRepository.getInstance();
+		Entry entry = repository.getEntry(artifactId);
+		if (entry == null) {
+			return createErrorResult("INVALID_PATH", "Entry not found: '" + artifactId + "'.");
+		}
+		if (entry.getParent() == null) {
+			return createErrorResult("INVALID_PATH", "Can not delete repository root entry '" + artifactId + "'.");
+		}
+		boolean deletable = entry.getParent() instanceof ExtensibleEntry;
+		if (!deletable && entry instanceof ResourceEntry && ((ResourceEntry) entry).getContainer() != null && ((ResourceEntry) entry).getContainer().getParent() instanceof ManageableContainer) {
+			deletable = true;
+		}
+		if (!deletable) {
+			return createErrorResult("NOT_DELETABLE", "Entry '" + artifactId + "' is not deletable.");
+		}
+		try {
+			List<String> dependenciesToReload = repository.getDependencies(artifactId);
+			if (entry.getParent() instanceof ExtensibleEntry) {
+				((ExtensibleEntry) entry.getParent()).deleteChild(entry.getName(), true);
+			}
+			else {
+				repository.unload(artifactId);
+				((ManageableContainer<?>) ((ResourceEntry) entry).getContainer().getParent()).delete(entry.getName());
+				repository.reload(entry.getParent().getId());
+			}
+			reloadArtifactsAfterMcpDelete(dependenciesToReload);
+			if (server.getCollaborationListener() != null) {
+				server.getCollaborationListener().notifyArtifactReload(artifactId, "MCP deleted");
+			}
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("code", "DELETED");
+			structuredContent.put("artifactId", artifactId);
+			structuredContent.put("success", true);
+			return structuredContent;
+		}
+		catch (Exception e) {
+			LOGGER.error("Could not delete artifact " + artifactId, e);
+			return createErrorResult("DELETE_FAILED", firstExceptionMessage(e));
+		}
+	}
+
 	private Map<String, Object> moveArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		List<String> namespaces = resolveNamespaces(configuration, null, meta);
 		String oldId = requiredString(arguments, "oldId", "MISSING_OLD_ID");
@@ -2215,16 +2291,40 @@ public class MCPREST {
 				}
 			}
 		};
+		submitMcpReload(reloadDependencies, "Could not schedule dependency reload after MCP update for " + artifactId);
+	}
+
+	private void reloadArtifactsAfterMcpDelete(final List<String> artifactIds) {
+		if (artifactIds == null || artifactIds.isEmpty()) {
+			return;
+		}
+		Runnable reloadDependencies = new Runnable() {
+			@Override
+			public void run() {
+				for (String artifactId : artifactIds) {
+					try {
+						server.getRepository().reload(artifactId, false);
+					}
+					catch (Exception e) {
+						LOGGER.warn("Could not reload dependency after MCP delete for " + artifactId, e);
+					}
+				}
+			}
+		};
+		submitMcpReload(reloadDependencies, "Could not schedule dependency reload after MCP delete");
+	}
+
+	private void submitMcpReload(Runnable reloadTask, String errorMessage) {
 		try {
 			if (server.getPool() != null) {
-				server.getPool().submit(reloadDependencies);
+				server.getPool().submit(reloadTask);
 			}
 			else {
-				ForkJoinPool.commonPool().submit(reloadDependencies);
+				ForkJoinPool.commonPool().submit(reloadTask);
 			}
 		}
 		catch (RejectedExecutionException e) {
-			LOGGER.warn("Could not schedule dependency reload after MCP update for " + artifactId, e);
+			LOGGER.warn(errorMessage, e);
 		}
 	}
 
@@ -2386,6 +2486,14 @@ public class MCPREST {
 			return "No artifact fragments matched the search.";
 		}
 		return "Found " + totalResults.intValue() + " matching artifact fragment" + (totalResults.intValue() == 1 ? "." : "s.");
+	}
+
+	private String buildDeleteDisplayMessage(Map<String, Object> structuredContent) {
+		if (asBoolean(structuredContent.get("success"))) {
+			return "Deleted artifact '" + string(structuredContent.get("artifactId")) + "'.";
+		}
+		String message = string(structuredContent.get("message"));
+		return message == null ? "Artifact delete failed." : message;
 	}
 
 	private String buildMoveDisplayMessage(Map<String, Object> structuredContent) {
@@ -2784,10 +2892,10 @@ public class MCPREST {
 
 	private List<String> intersectNamespaces(List<String> left, List<String> right) {
 		if (left == null || left.isEmpty()) {
-			return Collections.emptyList();
+			return right == null || right.isEmpty() ? null : new ArrayList<String>(right);
 		}
 		if (right == null || right.isEmpty()) {
-			return Collections.emptyList();
+			return new ArrayList<String>(left);
 		}
 		List<String> merged = new ArrayList<String>();
 		for (String leftNamespace : left) {
@@ -3734,8 +3842,17 @@ public class MCPREST {
 	private org.w3c.dom.Node prepareSearchResultNode(org.w3c.dom.Node node, int depth) throws Exception {
 		org.w3c.dom.Document copy = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 		org.w3c.dom.Node imported = copy.importNode(node, true);
-		copy.appendChild(imported);
-		trimSearchResult(imported, depth, false);
+		if (imported.getNodeType() == org.w3c.dom.Node.ATTRIBUTE_NODE) {
+			return imported;
+		}
+		if (imported.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+			copy.appendChild(imported);
+			trimSearchResult(imported, depth, false);
+			return imported;
+		}
+		org.w3c.dom.Element wrapper = copy.createElement("result");
+		copy.appendChild(wrapper);
+		wrapper.appendChild(imported);
 		return imported;
 	}
 
@@ -3858,12 +3975,22 @@ public class MCPREST {
 	}
 
 	private String nodeToString(org.w3c.dom.Node node) throws Exception {
+		if (node == null) {
+			return "";
+		}
+		short nodeType = node.getNodeType();
+		if (nodeType == org.w3c.dom.Node.ATTRIBUTE_NODE) {
+			return "@" + node.getNodeName() + "=\"" + escapeXml(node.getNodeValue()) + "\"";
+		}
+		if (nodeType == org.w3c.dom.Node.TEXT_NODE || nodeType == org.w3c.dom.Node.CDATA_SECTION_NODE) {
+			return escapeXml(node.getNodeValue());
+		}
 		javax.xml.transform.TransformerFactory factory = javax.xml.transform.TransformerFactory.newInstance();
 		try {
 			factory.setAttribute("indent-number", Integer.valueOf(1));
 		}
 		catch (IllegalArgumentException e) {
-			// best effort
+			LOGGER.debug("TransformerFactory does not support indent-number", e);
 		}
 		javax.xml.transform.Transformer transformer = factory.newTransformer();
 		transformer.setOutputProperty(javax.xml.transform.OutputKeys.OMIT_XML_DECLARATION, "yes");
@@ -3872,6 +3999,18 @@ public class MCPREST {
 		java.io.StringWriter writer = new java.io.StringWriter();
 		transformer.transform(new javax.xml.transform.dom.DOMSource(node), new javax.xml.transform.stream.StreamResult(writer));
 		return writer.toString().replace("    ", "\t").trim();
+	}
+
+	private String escapeXml(String value) {
+		if (value == null || value.isEmpty()) {
+			return "";
+		}
+		return value
+			.replace("&", "&amp;")
+			.replace("<", "&lt;")
+			.replace(">", "&gt;")
+			.replace("\"", "&quot;")
+			.replace("'", "&apos;");
 	}
 
 	private java.nio.file.Path traceRoot() throws IOException {

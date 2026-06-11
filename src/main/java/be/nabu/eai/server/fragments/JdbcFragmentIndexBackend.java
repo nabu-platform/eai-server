@@ -193,6 +193,9 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		List<String> filteredNamespaces = filterValues(namespaces);
 		List<String> filteredArtifactTypes = filterValues(artifactTypes);
 		List<String> filteredArtifactCategories = filterValues(artifactCategories);
+		if (namespaces != null && filteredNamespaces.isEmpty()) {
+			return Collections.emptyList();
+		}
 		try {
 			connection = dataSource.getConnection();
 			StringBuilder sql = new StringBuilder("select artifact_id, path, artifact_type, artifact_category, fragment_type, content, content_type, properties, editable, removable from fragment_index");
@@ -292,6 +295,9 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 			List<String> filteredNamespaces = filterValues(namespaces);
 			List<String> filteredArtifactTypes = filterValues(artifactTypes);
 			List<String> filteredArtifactCategories = filterValues(artifactCategories);
+			if (namespaces != null && filteredNamespaces.isEmpty()) {
+				return Collections.emptyList();
+			}
 			boolean hasWhere = false;
 			if (!filteredNamespaces.isEmpty()) {
 				sql.append(" where (");

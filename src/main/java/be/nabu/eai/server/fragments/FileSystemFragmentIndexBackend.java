@@ -192,6 +192,9 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 
 	@Override
 	public List<FragmentSearch> list(List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories) {
+		if (namespaces != null && filterValues(namespaces).isEmpty()) {
+			return Collections.emptyList();
+		}
 		try {
 			List<Path> files = new ArrayList<Path>();
 			java.nio.file.Files.walk(root)
@@ -207,6 +210,9 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 
 	@Override
 	public List<FragmentSearch> search(String pattern, List<String> globs, List<String> namespaces, List<String> artifactTypes, List<String> artifactCategories, boolean caseSensitive, int before, int after, int limit) {
+		if (namespaces != null && filterValues(namespaces).isEmpty()) {
+			return Collections.emptyList();
+		}
 		ensureRipgrep();
 		List<String> command = new ArrayList<String>();
 		command.add("rg");
