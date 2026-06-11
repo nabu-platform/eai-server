@@ -169,6 +169,7 @@ public class MCPREST {
 	private static final String WRITE_DOCUMENTATION_TOOL_NAME = "write_nabu_documentation";
 	private static final String DELETE_DOCUMENTATION_TOOL_NAME = "delete_nabu_documentation";
 	private static final String CREATE_TOOL_NAME = "create_nabu_artifact";
+	private static final String MOVE_TOOL_NAME = "move_nabu_artifact";
 	private static final String CREATE_PROJECT_TOOL_NAME = "create_nabu_project";
 	private static final String SKILLS_TOOL_NAME = "get_nabu_skills";
 	private static final String INVOKE_TOOL_NAME = "invoke_nabu_service";
@@ -203,6 +204,7 @@ public class MCPREST {
 		WRITE_DOCUMENTATION_TOOL_NAME,
 		DELETE_DOCUMENTATION_TOOL_NAME,
 		CREATE_TOOL_NAME,
+		MOVE_TOOL_NAME,
 		CREATE_PROJECT_TOOL_NAME,
 		SKILLS_TOOL_NAME,
 		INVOKE_TOOL_NAME,
@@ -513,6 +515,23 @@ public class MCPREST {
 				tools.add(createTool);
 				createTool.put("inputSchema", createInputSchema);
 			}
+			Map<String, Object> moveTool = new LinkedHashMap<String, Object>();
+			moveTool.put("name", MOVE_TOOL_NAME);
+			moveTool.put("title", "Move nabu artifact");
+			moveTool.put("description", "Move or rename an existing nabu artifact or namespace to a new artifact id or namespace. This uses the repository move flow, including dependency relinking where supported.");
+			Map<String, Object> moveAnnotations = new LinkedHashMap<String, Object>();
+			moveAnnotations.put("scopes", Arrays.asList("write:nabu:artifact"));
+			moveAnnotations.put("intentTemplate", "Moving {oldId} to {newId}");
+			moveTool.put("annotations", moveAnnotations);
+			Map<String, Object> moveInputSchema = new LinkedHashMap<String, Object>();
+			moveInputSchema.put("type", "object");
+			Map<String, Object> moveProperties = new LinkedHashMap<String, Object>();
+			moveProperties.put("oldId", propertySchema("string", "Current artifact id or namespace to move."));
+			moveProperties.put("newId", propertySchema("string", "Destination artifact id or namespace after the move."));
+			moveInputSchema.put("properties", moveProperties);
+			moveInputSchema.put("required", Arrays.asList("oldId", "newId"));
+			moveTool.put("inputSchema", moveInputSchema);
+			tools.add(moveTool);
 			Map<String, Object> createProjectTool = new LinkedHashMap<String, Object>();
 			createProjectTool.put("name", CREATE_PROJECT_TOOL_NAME);
 			createProjectTool.put("title", "Create nabu project");
@@ -672,6 +691,9 @@ public class MCPREST {
 				}
 				else if (CREATE_TOOL_NAME.equals(name)) {
 					toolResult = createToolResult(arguments, meta, configuration);
+				}
+				else if (MOVE_TOOL_NAME.equals(name)) {
+					toolResult = moveToolResult(arguments, meta, configuration);
 				}
 				else if (CREATE_PROJECT_TOOL_NAME.equals(name)) {
 					toolResult = createProjectToolResult(arguments);
@@ -1108,6 +1130,13 @@ public class MCPREST {
 		return structuredContent;
 	}
 
+	private Map<String, Object> createReadFragmentError(String artifactId, String path, String code, String message) {
+		Map<String, Object> structuredContent = createErrorResult(code, message);
+		structuredContent.put("artifactId", artifactId);
+		structuredContent.put("path", path);
+		return structuredContent;
+	}
+
 	private Map<String, Object> validateCreateArguments(String namespace, String name, String type, List<String> namespaces) {
 		if (!isValidCreateName(name)) {
 			return createErrorResult("INVALID_NAME", "Invalid artifact name '" + name + "'. Names must match the strict repository naming convention and may not use reserved names.");
@@ -1212,6 +1241,12 @@ public class MCPREST {
 		Map<String, Object> structuredContent = createProject(arguments);
 		List<Map<String, String>> content = textContent(toJson(structuredContent));
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildCreateProjectDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
+	}
+
+	private ToolResult moveToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		Map<String, Object> structuredContent = moveArtifact(arguments, meta, configuration);
+		List<Map<String, String>> content = textContent(toJson(structuredContent));
+		return new ToolResult(structuredContent, content, buildToolMeta(null, buildMoveDisplayMessage(structuredContent)), asBoolean(structuredContent.get("isError")), string(structuredContent.get("message")));
 	}
 
 	private ToolResult editToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration, boolean preview) throws IOException, ParseException {
@@ -1770,6 +1805,40 @@ public class MCPREST {
 		}
 	}
 
+	private Map<String, Object> moveArtifact(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
+		List<String> namespaces = resolveNamespaces(configuration, null, meta);
+		String oldId = requiredString(arguments, "oldId", "MISSING_OLD_ID");
+		String newId = requiredString(arguments, "newId", "MISSING_NEW_ID");
+		if (!isAllowedNamespace(oldId, namespaces) || !isAllowedNamespace(newId, namespaces)) {
+			return createErrorResult("INVALID_PATH", "Artifact move must stay within the allowed namespaces.");
+		}
+		EAIResourceRepository repository = EAIResourceRepository.getInstance();
+		Entry sourceEntry = repository.getEntry(oldId);
+		if (sourceEntry == null) {
+			return createErrorResult("INVALID_PATH", "Entry not found: '" + oldId + "'.");
+		}
+		if (repository.getEntry(newId) != null) {
+			return createErrorResult("INVALID_PATH", "Entry already exists: '" + newId + "'.");
+		}
+		String targetName = newId.contains(".") ? newId.replaceAll(".*\\.([^.]+)$", "$1") : newId;
+		if (!isValidCreateName(targetName)) {
+			return createErrorResult("INVALID_NAME", "Invalid target artifact name '" + targetName + "'. Names must match the strict repository naming convention and may not use reserved names.");
+		}
+		try {
+			List<Validation<?>> validations = repository.move(oldId, newId, true);
+			Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
+			structuredContent.put("oldId", oldId);
+			structuredContent.put("newId", newId);
+			structuredContent.put("validationCount", validations == null ? 0 : validations.size());
+			structuredContent.put("validations", validationMaps(validations == null ? Collections.<Validation<?>>emptyList() : validations));
+			structuredContent.put("success", true);
+			return structuredContent;
+		}
+		catch (Exception e) {
+			return createErrorResult("MOVE_FAILED", firstExceptionMessage(e));
+		}
+	}
+
 	private Map<String, Object> createProject(Map<String, Object> arguments) {
 		String name = requiredString(arguments, "name", "MISSING_NAME");
 		String type = requiredString(arguments, "type", "MISSING_TYPE");
@@ -1843,10 +1912,18 @@ public class MCPREST {
 		}
 		Map<String, FragmentSearch> indexedFragments = indexFragments(getIndexedFragments(artifactIds, paths, namespaces));
 		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> errors = new ArrayList<Map<String, Object>>();
 		int totalBytes = 0;
 		boolean truncated = false;
 		for (Map<String, Object> request : requests) {
-			Map<String, Object> result = readArtifact(request, indexedFragments);
+			String artifactId = requiredString(request, "artifactId", "MISSING_ARTIFACT_ID");
+			String path = requiredString(request, "path", "MISSING_PATH");
+			FragmentSearch fragment = indexedFragments.get(fragmentKey(artifactId, path));
+			if (fragment == null) {
+				errors.add(createReadFragmentError(artifactId, path, "INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'."));
+				continue;
+			}
+			Map<String, Object> result = readArtifact(request, fragment);
 			String fragmentContent = string(result.get("content"));
 			int fragmentBytes = fragmentContent == null ? 0 : fragmentContent.getBytes(StandardCharsets.UTF_8).length;
 			if (!results.isEmpty() && totalBytes + fragmentBytes > MAX_MULTI_READ_BYTES) {
@@ -1856,9 +1933,15 @@ public class MCPREST {
 			results.add(result);
 			totalBytes += fragmentBytes;
 		}
+		if (results.isEmpty() && !errors.isEmpty()) {
+			Map<String, Object> firstError = errors.get(0);
+			throw protocolError(string(firstError.get("code")), string(firstError.get("message")));
+		}
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 		structuredContent.put("fragments", results);
+		structuredContent.put("errors", errors);
 		structuredContent.put("count", results.size());
+		structuredContent.put("errorCount", errors.size());
 		structuredContent.put("totalRequested", fragments.size());
 		structuredContent.put("truncated", truncated);
 		structuredContent.put("totalBytes", totalBytes);
@@ -2305,6 +2388,14 @@ public class MCPREST {
 		return "Found " + totalResults.intValue() + " matching artifact fragment" + (totalResults.intValue() == 1 ? "." : "s.");
 	}
 
+	private String buildMoveDisplayMessage(Map<String, Object> structuredContent) {
+		if (asBoolean(structuredContent.get("success"))) {
+			return "Moved entry to " + string(structuredContent.get("newId")) + ".";
+		}
+		String message = string(structuredContent.get("message"));
+		return message == null ? "Artifact move failed." : message;
+	}
+
 	private String buildSkillsDisplayMessage(Map<String, Object> structuredContent) {
 		Number count = (Number) structuredContent.get("count");
 		int total = count == null ? 0 : count.intValue();
@@ -2342,8 +2433,19 @@ public class MCPREST {
 
 	private String buildReadMultipleDisplayMessage(Map<String, Object> structuredContent) {
 		int count = integer(structuredContent.get("count"), 0);
+		int errorCount = integer(structuredContent.get("errorCount"), 0);
 		boolean truncated = asBoolean(structuredContent.get("truncated"));
-		return "Read " + count + " artifact fragment" + (count == 1 ? "" : "s") + (truncated ? " (truncated)." : ".");
+		String message = "Read " + count + " artifact fragment" + (count == 1 ? "" : "s");
+		if (errorCount > 0) {
+			message += "; missed " + errorCount + " fragment" + (errorCount == 1 ? "" : "s");
+		}
+		if (truncated) {
+			message += " (truncated).";
+		}
+		else {
+			message += ".";
+		}
+		return message;
 	}
 
 	private String buildCreateDisplayMessage(Map<String, Object> structuredContent) {
@@ -3194,6 +3296,10 @@ public class MCPREST {
 		searchTool.put("name", SEARCH_DOCUMENTATION_TOOL_NAME);
 		searchTool.put("title", "Search nabu documentation");
 		searchTool.put("description", "Search documentation files under protected/documentation. Match snippets include line numbers. Namespace identifies the documented repository entry; path is relative to namespace.");
+		Map<String, Object> searchAnnotations = new LinkedHashMap<String, Object>();
+		searchAnnotations.put("scopes", Arrays.asList("read:nabu:documentation"));
+		searchAnnotations.put("intentTemplate", "Search documentation for {pattern} [in namespaces {namespace}] [with glob {glob}] [context {context}] [before {beforeContext}] [after {afterContext}]");
+		searchTool.put("annotations", searchAnnotations);
 		Map<String, Object> searchInputSchema = new LinkedHashMap<String, Object>();
 		searchInputSchema.put("type", "object");
 		Map<String, Object> searchProperties = new LinkedHashMap<String, Object>();
@@ -3220,6 +3326,10 @@ public class MCPREST {
 		findTool.put("name", FIND_DOCUMENTATION_TOOL_NAME);
 		findTool.put("title", "Find nabu documentation");
 		findTool.put("description", "Find indexed documentation using namespace and documentation-relative path filters. The optional pattern is a full-match regex by default, not a contains search. For substring matching use .*text.* or set glob=true and use *text*. Results include editable/removable flags.");
+		Map<String, Object> findAnnotations = new LinkedHashMap<String, Object>();
+		findAnnotations.put("scopes", Arrays.asList("read:nabu:documentation"));
+		findAnnotations.put("intentTemplate", "Find documentation [matching full regex/glob {pattern}] [in namespace {namespace}] [limit {limit}]");
+		findTool.put("annotations", findAnnotations);
 		Map<String, Object> findInputSchema = new LinkedHashMap<String, Object>();
 		findInputSchema.put("type", "object");
 		Map<String, Object> findProperties = new LinkedHashMap<String, Object>();
@@ -3238,6 +3348,10 @@ public class MCPREST {
 		readTool.put("name", READ_DOCUMENTATION_TOOL_NAME);
 		readTool.put("title", "Read nabu documentation");
 		readTool.put("description", "Read lines from documentation. Returned content is raw text. Namespace identifies the documented repository entry; path is relative to the namespace.");
+		Map<String, Object> readAnnotations = new LinkedHashMap<String, Object>();
+		readAnnotations.put("scopes", Arrays.asList("read:nabu:documentation"));
+		readAnnotations.put("intentTemplate", "Read documentation {namespace}/{path} [from line {startLine}] [limit {limit}]");
+		readTool.put("annotations", readAnnotations);
 		Map<String, Object> readInputSchema = documentationReadInputSchema(false);
 		readTool.put("inputSchema", readInputSchema);
 		readTool.put("outputSchema", readOutputSchema());
@@ -3247,6 +3361,10 @@ public class MCPREST {
 		readMultipleTool.put("name", READ_MULTIPLE_DOCUMENTATION_TOOL_NAME);
 		readMultipleTool.put("title", "Read multiple docs");
 		readMultipleTool.put("description", "Read lines from multiple documentation files in one call. Returned content is raw text.");
+		Map<String, Object> readMultipleAnnotations = new LinkedHashMap<String, Object>();
+		readMultipleAnnotations.put("scopes", Arrays.asList("read:nabu:documentation"));
+		readMultipleAnnotations.put("intentTemplate", "Read multiple documentation files");
+		readMultipleTool.put("annotations", readMultipleAnnotations);
 		Map<String, Object> readMultipleInputSchema = documentationReadInputSchema(true);
 		readMultipleTool.put("inputSchema", readMultipleInputSchema);
 		readMultipleTool.put("outputSchema", readMultipleOutputSchema());
@@ -3256,6 +3374,10 @@ public class MCPREST {
 		editTool.put("name", EDIT_DOCUMENTATION_TOOL_NAME);
 		editTool.put("title", "Edit nabu documentation");
 		editTool.put("description", "Replace exact matches in editable documentation under protected/documentation.");
+		Map<String, Object> editAnnotations = new LinkedHashMap<String, Object>();
+		editAnnotations.put("scopes", Arrays.asList("write:nabu:documentation"));
+		editAnnotations.put("intentTemplate", "Edit documentation {namespace}/{path} by replacing exact matches");
+		editTool.put("annotations", editAnnotations);
 		Map<String, Object> editInputSchema = new LinkedHashMap<String, Object>();
 		editInputSchema.put("type", "object");
 		Map<String, Object> editProperties = new LinkedHashMap<String, Object>();
@@ -3273,6 +3395,10 @@ public class MCPREST {
 		writeTool.put("name", WRITE_DOCUMENTATION_TOOL_NAME);
 		writeTool.put("title", "Write nabu documentation");
 		writeTool.put("description", "Overwrite, append, or prepend editable documentation under protected/documentation. Creates files when possible.");
+		Map<String, Object> writeAnnotations = new LinkedHashMap<String, Object>();
+		writeAnnotations.put("scopes", Arrays.asList("write:nabu:documentation"));
+		writeAnnotations.put("intentTemplate", "Write documentation {namespace}/{path} [mode {mode}]");
+		writeTool.put("annotations", writeAnnotations);
 		Map<String, Object> writeInputSchema = new LinkedHashMap<String, Object>();
 		writeInputSchema.put("type", "object");
 		Map<String, Object> writeProperties = new LinkedHashMap<String, Object>();
@@ -3293,6 +3419,10 @@ public class MCPREST {
 		deleteTool.put("name", DELETE_DOCUMENTATION_TOOL_NAME);
 		deleteTool.put("title", "Delete nabu documentation");
 		deleteTool.put("description", "Delete removable documentation under protected/documentation.");
+		Map<String, Object> deleteAnnotations = new LinkedHashMap<String, Object>();
+		deleteAnnotations.put("scopes", Arrays.asList("write:nabu:documentation"));
+		deleteAnnotations.put("intentTemplate", "Delete documentation {namespace}/{path}");
+		deleteTool.put("annotations", deleteAnnotations);
 		Map<String, Object> deleteInputSchema = new LinkedHashMap<String, Object>();
 		deleteInputSchema.put("type", "object");
 		Map<String, Object> deleteProperties = new LinkedHashMap<String, Object>();
@@ -3420,7 +3550,19 @@ public class MCPREST {
 		Map<String, Object> fragments = schema("array");
 		fragments.put("items", readOutputSchema());
 		properties.put("fragments", fragments);
+		Map<String, Object> errors = schema("array");
+		Map<String, Object> errorItem = new LinkedHashMap<String, Object>();
+		errorItem.put("type", "object");
+		Map<String, Object> errorProperties = new LinkedHashMap<String, Object>();
+		errorProperties.put("artifactId", schema("string"));
+		errorProperties.put("path", schema("string"));
+		errorProperties.put("code", schema("string"));
+		errorProperties.put("message", schema("string"));
+		errorItem.put("properties", errorProperties);
+		errors.put("items", errorItem);
+		properties.put("errors", errors);
 		properties.put("count", schema("integer"));
+		properties.put("errorCount", schema("integer"));
 		properties.put("totalRequested", schema("integer"));
 		properties.put("totalBytes", schema("integer"));
 		properties.put("truncated", schema("boolean"));
