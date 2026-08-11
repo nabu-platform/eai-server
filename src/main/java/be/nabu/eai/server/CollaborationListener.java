@@ -141,7 +141,6 @@ public class CollaborationListener {
 			}
 		});
 		
-		final List<FileStore> filestores = SystemMetrics.filestores();
 		final MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
 		final OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
 		// push server statistics to the developers
@@ -164,13 +163,14 @@ public class CollaborationListener {
 //						MemoryUsage nonHeapMemoryUsage = memoryMXBean.getNonHeapMemoryUsage();
 //						metrics.add(new ServerStatistic("memory", "nonHeap", date.getTime(), ((100.0 * nonHeapMemoryUsage.getUsed()) / nonHeapMemoryUsage.getMax())));
 						
-						for (FileStore store : filestores) {
+						// Refresh filestores each cycle so disconnected mounts are skipped
+						for (FileStore store : SystemMetrics.filestores()) {
 							try {
-								
 								metrics.add(new ServerStatistic("file", store.name(), date.getTime(), (((1.0 * (store.getTotalSpace() - store.getUsableSpace())) / store.getTotalSpace()) * 100)));
 							}
 							catch (IOException e) {
-								logger.warn("Can't read file statistics for " + store.name(), e);
+								// Some mounts can disappear between sampling cycles; avoid noisy stack traces
+								logger.debug("Skipping file statistics for {}: {}", store.name(), e.getMessage());
 							}
 						}
 						statistics.setStatistics(metrics);
