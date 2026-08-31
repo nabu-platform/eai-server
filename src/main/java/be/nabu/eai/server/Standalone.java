@@ -83,6 +83,7 @@ public class Standalone {
 	
 	private static Logger logger = LoggerFactory.getLogger(Standalone.class);
 	private Server server;
+	private File startedScript;
 	
 	public static void main(String...args) throws IOException, URISyntaxException, InstantiationException, IllegalAccessException, ClassNotFoundException {
 		// ask to stop
@@ -142,6 +143,12 @@ public class Standalone {
 				System.getProperties().setProperty(key, environmentVariable.getValue());
 			}
 		}
+
+		File installationDirectory = new File(new URI(getIntegratorPath()));
+		File startingScript = resolveLifecycleScript("starting", getArgument("starting", null, args), installationDirectory);
+		startedScript = resolveLifecycleScript("started", getArgument("started", null, args), installationDirectory);
+		final File shutdownScript = resolveLifecycleScript("shutdown", getArgument("shutdown", null, args), installationDirectory);
+		runLifecycleScript("starting", startingScript);
 		
 		int port = Integer.parseInt(getArgument("port", "5555", args));
 		int listenerPoolSize = Integer.parseInt(getArgument("listenerPoolSize", "20", args));
@@ -381,6 +388,14 @@ public class Standalone {
 		
 		logger.debug("Building server...");
 		server = new Server(roleHandler, repositoryInstance, startupEvent);
+		if (shutdownScript != null) {
+			server.addShutdownAction(new Runnable() {
+				@Override
+				public void run() {
+					runLifecycleScript("shutdown", shutdownScript);
+				}
+			});
+		}
 		
 		// register this shutdown hook _before_ hazelcast, otherwise we can't correctly wind down hazelcast-based artifacts
 		server.addShutdownHook();
@@ -538,6 +553,42 @@ public class Standalone {
 			}
 		}
 		logger.info("------------------------------------ SERVER READY ------------------------------------");
+		runLifecycleScript("started", startedScript);
+	}
+
+	private static File resolveLifecycleScript(String lifecycle, String path, File installationDirectory) {
+		boolean configured = path != null;
+		File script = new File(configured ? path : lifecycle);
+		if (!script.isAbsolute()) {
+			script = new File(installationDirectory, script.getPath());
+		}
+		return configured || script.isFile() ? script : null;
+	}
+
+	private static void runLifecycleScript(String lifecycle, File script) {
+		if (script == null) {
+			return;
+		}
+		logger.info("Running " + lifecycle + " lifecycle script: " + script.getAbsolutePath());
+		try {
+			Process process = new ProcessBuilder(script.getAbsolutePath())
+				.directory(script.getParentFile())
+				.inheritIO()
+				.start();
+			int exitCode = process.waitFor();
+			if (exitCode == 0) {
+				logger.info("Completed " + lifecycle + " lifecycle script: " + script.getAbsolutePath());
+			}
+			else {
+				logger.error("The " + lifecycle + " lifecycle script exited with code " + exitCode + ": " + script.getAbsolutePath());
+			}
+		}
+		catch (Exception e) {
+			logger.error("Could not run " + lifecycle + " lifecycle script: " + script.getAbsolutePath(), e);
+			if (e instanceof InterruptedException) {
+				Thread.currentThread().interrupt();
+			}
+		}
 	}
 
 	public static String getIntegratorPath() {
