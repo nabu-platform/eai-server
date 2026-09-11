@@ -2267,6 +2267,9 @@ public class MCPREST {
 			reloadArtifactAfterMcpUpdate(artifactId);
 			notifyCollaborationReload(artifactId);
 		}
+		else if (server.getFragmentIndexService() != null) {
+			server.getFragmentIndexService().refresh(artifactId);
+		}
 	}
 
 	private void reloadArtifactAfterMcpUpdate(String artifactId) {

@@ -58,6 +58,16 @@ public class FragmentIndexService {
 		}
 	}
 
+	public void refresh(String artifactId) {
+		Node node = repository.getNode(artifactId);
+		if (node == null) {
+			backend.delete(artifactId);
+		}
+		else {
+			index(artifactId, node);
+		}
+	}
+
 	public FragmentSearch get(String artifactId, String path) {
 		return backend.get(artifactId, path);
 	}
