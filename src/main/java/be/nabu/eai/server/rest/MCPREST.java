@@ -583,9 +583,9 @@ public class MCPREST {
 			Map<String, Object> skillsProperties = new LinkedHashMap<String, Object>();
 			Map<String, Object> skills = schema("array");
 			Map<String, Object> skillItem = schema("string");
-			skillItem.put("enum", listAvailableSkillNames());
+			skillItem.put("enum", listAvailableSkillNames(configuration));
 			skills.put("items", skillItem);
-			skills.put("description", "Skill names to fetch, for example artifact:structure or tool:invoke_nabu_service.");
+			skills.put("description", "Skill names to fetch, for example artifact:structure, tool:invoke_nabu_service, or repository:namespace:path/to/skill.");
 			skillsProperties.put("skills", skills);
 			skillsInputSchema.put("properties", skillsProperties);
 			skillsInputSchema.put("required", Arrays.asList("skills"));
@@ -722,7 +722,7 @@ public class MCPREST {
 					toolResult = createProjectToolResult(arguments);
 				}
 				else if (SKILLS_TOOL_NAME.equals(name)) {
-					toolResult = skillsToolResult(arguments);
+					toolResult = skillsToolResult(arguments, meta, configuration);
 				}
 				else if (INVOKE_TOOL_NAME.equals(name)) {
 					toolResult = invokeToolResult(arguments);
@@ -772,9 +772,9 @@ public class MCPREST {
 		return new ToolResult(structuredContent, content, buildToolMeta(null, buildSearchDisplayMessage(structuredContent)));
 	}
 
-	private ToolResult skillsToolResult(Map<String, Object> arguments) {
+	private ToolResult skillsToolResult(Map<String, Object> arguments, Map<String, Object> meta, MCPConfiguration configuration) {
 		List<String> skills = stringList(arguments == null ? null : arguments.get("skills"));
-		String markdown = buildSkillsMarkdown(skills);
+		String markdown = buildSkillsMarkdown(skills, meta, configuration);
 		Map<String, Object> structuredContent = new LinkedHashMap<String, Object>();
 		structuredContent.put("markdown", markdown);
 		structuredContent.put("count", skills == null ? 0 : skills.size());
@@ -864,14 +864,14 @@ public class MCPREST {
 		return new ToolResult(structuredContent, textContent(toJson(structuredContent)), buildToolMeta(null, buildTraceSearchDisplayMessage(structuredContent)));
 	}
 
-	private String buildSkillsMarkdown(List<String> skills) {
+	private String buildSkillsMarkdown(List<String> skills, Map<String, Object> meta, MCPConfiguration configuration) {
 		if (skills == null || skills.isEmpty()) {
 			throw protocolError("MISSING_SKILLS", "Missing required argument 'skills'.");
 		}
 		StringBuilder builder = new StringBuilder();
 		for (String skill : skills) {
 			builder.append("# Skill: `").append(skill).append("`\n\n");
-			String guidelines = getSkillGuidelines(skill);
+			String guidelines = getSkillGuidelines(skill, meta, configuration);
 			if (guidelines == null || guidelines.trim().isEmpty()) {
 				builder.append("No guidance is available for this skill.\n\n");
 			}
@@ -882,7 +882,7 @@ public class MCPREST {
 		return builder.toString().trim();
 	}
 
-	private List<String> listAvailableSkillNames() {
+	private List<String> listAvailableSkillNames(MCPConfiguration configuration) {
 		Set<String> skills = new LinkedHashSet<String>();
 		for (String artifactType : listArtifactSkills()) {
 			skills.add("artifact:" + artifactType);
@@ -892,6 +892,12 @@ public class MCPREST {
 		}
 		for (String designSkill : listDesignSkills()) {
 			skills.add("design:" + designSkill);
+		}
+		for (DocumentationSearch document : documentationCatalog().list(null, resolveNamespaces(configuration, null, null))) {
+			String skillName = repositorySkillName(document.getNamespace(), document.getPath());
+			if (skillName != null) {
+				skills.add(skillName);
+			}
 		}
 		return new ArrayList<String>(skills);
 	}
@@ -1008,7 +1014,7 @@ public class MCPREST {
 		return artifactCategory == null || artifactCategory.trim().isEmpty() ? null : artifactCategory.trim();
 	}
 
-	private String getSkillGuidelines(String skill) {
+	private String getSkillGuidelines(String skill, Map<String, Object> meta, MCPConfiguration configuration) {
 		if (skill == null || skill.trim().isEmpty()) {
 			throw protocolError("MISSING_SKILL", "Skill name must not be empty.");
 		}
@@ -1033,7 +1039,28 @@ public class MCPREST {
 				return guidelines;
 			}
 		}
+		if (skill.startsWith("repository:")) {
+			String qualifiedName = skill.substring("repository:".length());
+			int separator = qualifiedName.indexOf(':');
+			if (separator > 0 && separator < qualifiedName.length() - 1) {
+				String namespace = qualifiedName.substring(0, separator);
+				String path = "skills/" + qualifiedName.substring(separator + 1) + ".md";
+				assertAllowedDocumentation(namespace, path, resolveNamespaces(configuration, null, meta));
+				DocumentationSearch document = documentationCatalog().get(namespace, path);
+				if (document != null) {
+					return document.getContent();
+				}
+			}
+		}
 		throw protocolError("UNKNOWN_SKILL", "Unknown skill: " + skill);
+	}
+
+	private String repositorySkillName(String namespace, String path) {
+		if (namespace == null || namespace.trim().isEmpty() || path == null || !path.startsWith("skills/") || !path.endsWith(".md")) {
+			return null;
+		}
+		String name = path.substring("skills/".length(), path.length() - ".md".length());
+		return name.isEmpty() ? null : "repository:" + namespace + ":" + name;
 	}
 
 	private String loadClasspathSkill(String category, String name) {
