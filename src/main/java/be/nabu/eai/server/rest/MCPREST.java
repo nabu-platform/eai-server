@@ -41,6 +41,7 @@ import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.eai.repository.api.ArtifactFragmentManager;
 import be.nabu.eai.repository.api.CreatableArtifactFragmentManager;
 import be.nabu.eai.repository.api.DynamicArtifactFragmentManager;
+import be.nabu.eai.repository.api.DynamicEntry;
 import be.nabu.eai.repository.api.Entry;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager;
 import be.nabu.eai.repository.api.ReviewableArtifactFragmentManager.ReviewResource;
@@ -80,10 +81,14 @@ import be.nabu.libs.services.api.ServiceRuntimeTracker;
 import be.nabu.libs.http.HTTPException;
 import be.nabu.libs.http.api.HTTPRequest;
 import be.nabu.libs.resources.api.ManageableContainer;
+import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.api.ComplexType;
+import be.nabu.libs.types.api.DefinedType;
 import be.nabu.libs.types.binding.api.Window;
 import be.nabu.libs.types.binding.json.JSONBinding;
 import be.nabu.libs.types.binding.xml.XMLBinding;
+import be.nabu.libs.types.definition.xml.XMLDefinitionMarshaller;
 import be.nabu.libs.types.java.BeanInstance;
 import be.nabu.libs.types.map.MapContent;
 import be.nabu.libs.types.map.MapContentWrapper;
@@ -101,6 +106,16 @@ import be.nabu.utils.mime.impl.PlainMimeContentPart;
 public class MCPREST {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(MCPREST.class);
+
+	private static class FragmentAliasOwner {
+		private final Artifact artifact;
+		private final ArtifactFragmentManager<Artifact> manager;
+
+		private FragmentAliasOwner(Artifact artifact, ArtifactFragmentManager<Artifact> manager) {
+			this.artifact = artifact;
+			this.manager = manager;
+		}
+	}
 
 	private static class ToolResult {
 		private final Object structuredContent;
@@ -2014,6 +2029,8 @@ public class MCPREST {
 			}
 		}
 		Map<String, FragmentSearch> indexedFragments = indexFragments(getIndexedFragments(artifactIds, paths, namespaces));
+		Map<String, FragmentAliasOwner> aliasOwners = new LinkedHashMap<String, FragmentAliasOwner>();
+		Set<String> missingAliasOwners = new LinkedHashSet<String>();
 		List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
 		List<Map<String, Object>> errors = new ArrayList<Map<String, Object>>();
 		int totalBytes = 0;
@@ -2022,6 +2039,12 @@ public class MCPREST {
 			String artifactId = requiredString(request, "artifactId", "MISSING_ARTIFACT_ID");
 			String path = requiredString(request, "path", "MISSING_PATH");
 			FragmentSearch fragment = indexedFragments.get(fragmentKey(artifactId, path));
+			if (fragment == null) {
+				fragment = resolveFragmentAlias(artifactId, path, namespaces, aliasOwners, missingAliasOwners);
+			}
+			if (fragment == null) {
+				fragment = resolveTypeFragment(artifactId, path, namespaces);
+			}
 			if (fragment == null) {
 				errors.add(createReadFragmentError(artifactId, path, "INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'."));
 				continue;
@@ -2054,7 +2077,17 @@ public class MCPREST {
 	private Map<String, Object> readArtifact(Map<String, Object> arguments, List<String> namespaces) {
 		String artifactId = requiredString(arguments, "artifactId", "MISSING_ARTIFACT_ID");
 		String path = requiredString(arguments, "path", "MISSING_PATH");
-		return readArtifact(arguments, getIndexedFragment(artifactId, path, namespaces));
+		FragmentSearch fragment = findIndexedFragment(artifactId, path, namespaces);
+		if (fragment == null) {
+			fragment = resolveFragmentAlias(artifactId, path, namespaces, new LinkedHashMap<String, FragmentAliasOwner>(), new LinkedHashSet<String>());
+		}
+		if (fragment == null) {
+			fragment = resolveTypeFragment(artifactId, path, namespaces);
+		}
+		if (fragment == null) {
+			throw protocolError("INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'.");
+		}
+		return readArtifact(arguments, fragment);
 	}
 
 	private Map<String, Object> readArtifact(Map<String, Object> arguments, Map<String, FragmentSearch> indexedFragments) {
@@ -4238,13 +4271,98 @@ public class MCPREST {
 	}
 
 	private FragmentSearch getIndexedFragment(String artifactId, String path, List<String> namespaces) {
+		FragmentSearch fragment = findIndexedFragment(artifactId, path, namespaces);
+		if (fragment != null) {
+			return fragment;
+		}
+		throw protocolError("INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'.");
+	}
+
+	private FragmentSearch findIndexedFragment(String artifactId, String path, List<String> namespaces) {
 		List<FragmentSearch> fragments = getIndexedFragments(Collections.singletonList(artifactId), Collections.singletonList(path), namespaces);
 		for (FragmentSearch fragment : fragments) {
 			if (artifactId.equals(fragment.getArtifactId()) && path.equals(fragment.getPath())) {
 				return fragment;
 			}
 		}
-		throw protocolError("INVALID_PATH", "Fragment not found for artifact '" + artifactId + "' at path '" + path + "'.");
+		return null;
+	}
+
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	private FragmentSearch resolveFragmentAlias(String artifactId, String path, List<String> namespaces, Map<String, FragmentAliasOwner> owners, Set<String> missingOwners) {
+		String ownerId = artifactId;
+		while (ownerId != null && !ownerId.isEmpty()) {
+			if (!matchesNamespace(namespaces, ownerId)) {
+				return null;
+			}
+			Entry entry = server.getRepository().getEntry(ownerId);
+			if (entry == null || !entry.isNode()) {
+				int separator = ownerId.lastIndexOf('.');
+				ownerId = separator < 0 ? null : ownerId.substring(0, separator);
+				continue;
+			}
+			FragmentAliasOwner owner = getFragmentAliasOwner(ownerId, owners, missingOwners);
+			if (owner != null) {
+				ArtifactFragment alias = owner.manager.resolveFragmentAlias(owner.artifact, artifactId, path);
+				if (alias != null) {
+					return new FragmentSearch(artifactId, path, owner.manager.getArtifactType(), owner.manager.getArtifactCategory(), alias.getFragmentType(), alias.getContent(), alias.getContentType(), alias.getProperties(), Collections.<String>emptyList(), false, false);
+				}
+			}
+			if (!(entry instanceof DynamicEntry)) {
+				return null;
+			}
+			String originatingArtifact = ((DynamicEntry) entry).getOriginatingArtifact();
+			if (originatingArtifact == null || originatingArtifact.equals(ownerId)) {
+				return null;
+			}
+			ownerId = originatingArtifact;
+		}
+		return null;
+	}
+
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	private FragmentAliasOwner getFragmentAliasOwner(String ownerId, Map<String, FragmentAliasOwner> owners, Set<String> missingOwners) {
+		FragmentAliasOwner owner = owners.get(ownerId);
+		if (owner != null || missingOwners.contains(ownerId)) {
+			return owner;
+		}
+		try {
+			Artifact artifact = server.getRepository().resolve(ownerId);
+			if (artifact != null) {
+				ArtifactFragmentManager manager = EAIRepositoryUtils.getArtifactFragmentManager(artifact);
+				if (manager != null) {
+					owner = new FragmentAliasOwner(artifact, manager);
+					owners.put(ownerId, owner);
+					return owner;
+				}
+			}
+		}
+		catch (Exception e) {
+			LOGGER.debug("Could not resolve fragment alias owner: " + ownerId, e);
+		}
+		missingOwners.add(ownerId);
+		return null;
+	}
+
+	private FragmentSearch resolveTypeFragment(String artifactId, String path, List<String> namespaces) {
+		if (!"structure.xml".equals(path) || !matchesNamespace(namespaces, artifactId)) {
+			return null;
+		}
+		try {
+			DefinedType type = DefinedTypeResolverFactory.getInstance().getResolver().resolve(artifactId);
+			if (!(type instanceof ComplexType)) {
+				return null;
+			}
+			XMLDefinitionMarshaller marshaller = new XMLDefinitionMarshaller();
+			marshaller.setIgnoreUnknownSuperTypes(true);
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			marshaller.marshal(output, (ComplexType) type);
+			return new FragmentSearch(artifactId, path, "structure", "type", "structure", new String(output.toByteArray(), StandardCharsets.UTF_8), "application/xml", Collections.<String, String>emptyMap(), Collections.<String>emptyList(), false, false);
+		}
+		catch (Exception e) {
+			LOGGER.debug("Could not resolve complex type fragment: " + artifactId, e);
+			return null;
+		}
 	}
 
 	private Map<String, FragmentSearch> indexFragments(List<FragmentSearch> fragments) {
