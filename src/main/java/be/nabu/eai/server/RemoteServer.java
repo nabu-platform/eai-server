@@ -27,8 +27,11 @@ import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.security.Principal;
 import java.text.ParseException;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Future;
 
 import be.nabu.libs.http.HTTPException;
@@ -44,6 +47,7 @@ import be.nabu.libs.services.ServiceRuntime;
 import be.nabu.libs.services.SimpleServiceResult;
 import be.nabu.libs.services.api.DefinedService;
 import be.nabu.libs.services.api.ExecutionContext;
+import be.nabu.libs.services.api.FeaturedExecutionContext;
 import be.nabu.libs.services.api.NamedServiceRunner;
 import be.nabu.libs.services.api.Service;
 import be.nabu.libs.services.api.ServiceException;
@@ -285,7 +289,24 @@ public class RemoteServer implements NamedServiceRunner {
 		}
 		Map<String, Object> globalContext = ServiceRuntime.getGlobalContext();
 		String serviceContext = globalContext == null ? null : (String) globalContext.get("service.context");
+		if (serviceContext == null) {
+			ServiceRuntime currentRuntime = ServiceRuntime.getRuntime();
+			while (currentRuntime != null) {
+				serviceContext = (String) currentRuntime.getContext().get("service.context");
+				if (serviceContext != null) {
+					break;
+				}
+				currentRuntime = currentRuntime.getParent();
+			}
+		}
 		String additionalFeatures = globalContext == null ? null : (String) globalContext.get("features.additional");
+		Set<String> features = new LinkedHashSet<String>();
+		if (executionContext instanceof FeaturedExecutionContext) {
+			features.addAll(((FeaturedExecutionContext) executionContext).getEnabledFeatures());
+		}
+		if (additionalFeatures != null && !additionalFeatures.isBlank()) {
+			features.addAll(Arrays.asList(additionalFeatures.split("\\s*,\\s*")));
+		}
 		URI target = URIUtils.getChild(endpoint, "/invoke/" + ((DefinedService) service).getId());
 		XMLBinding xmlBinding = new XMLBinding(input.getType(), charset);
 		ServiceException exception = null;
@@ -310,8 +331,8 @@ public class RemoteServer implements NamedServiceRunner {
 			if (serviceContext != null) {
 				request.getContent().setHeader(new MimeHeader("Service-Context", serviceContext));
 			}
-			if (additionalFeatures != null) {
-				request.getContent().setHeader(new MimeHeader("Feature", additionalFeatures));
+			if (!features.isEmpty()) {
+				request.getContent().setHeader(new MimeHeader("Feature", String.join(",", features)));
 			}
 			HTTPResponse response = request(request);
 			
