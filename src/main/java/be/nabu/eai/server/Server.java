@@ -604,6 +604,8 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		repository.getEventDispatcher().subscribe(NodeEvent.class, new EventHandler<NodeEvent, Void>() {
 			@Override
 			public Void handle(NodeEvent nodeEvent) {
+				long started = System.nanoTime();
+				try {
 				if (nodeEvent.isDone()) {
 					logger.debug("[DONE] Receiving " + nodeEvent.getState() + " for " + nodeEvent.getId());
 					// a new node is loaded, let's check if we have to set something up
@@ -676,6 +678,13 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 					}
 				}
 				return null;
+				}
+				finally {
+					long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+					if (elapsed >= Long.getLong("reload.slow.phase.threshold", 5000L).longValue()) {
+						logger.warn("Slow server node handler id={} state={} done={} elapsedMs={} (wall elapsed; lifecycle and dependent work inclusive)", nodeEvent.getId(), nodeEvent.getState(), nodeEvent.isDone(), elapsed);
+					}
+				}
 			}
 		});
 		
@@ -734,6 +743,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 						// TODO: load in dependency order!
 						List<TwoPhaseStartableArtifact> twoPhasers = new ArrayList<TwoPhaseStartableArtifact>();
 						for (NodeEvent delayedNodeEvent : delayedNodeEvents) {
+							long delayedStarted = System.nanoTime();
 							try {
 								if (DefinedService.class.isAssignableFrom(delayedNodeEvent.getNode().getArtifactClass()) && NodeUtils.isEager(delayedNodeEvent.getNode())) {
 									run(delayedNodeEvent);
@@ -751,6 +761,12 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 							}
 							catch (Throwable e) {
 								logger.error("Could not run delayed node event: " + delayedNodeEvent.getState() + " on " + delayedNodeEvent.getId(), e);
+							}
+							finally {
+								long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - delayedStarted);
+								if (elapsed >= Long.getLong("reload.slow.phase.threshold", 5000L).longValue()) {
+									logger.warn("Slow delayed node lifecycle id={} state={} elapsedMs={} (wall elapsed including eager/start/restart)", delayedNodeEvent.getId(), delayedNodeEvent.getState(), elapsed);
+								}
 							}
 						}
 						boolean offline = isOffline();
@@ -1071,6 +1087,7 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 	}
 	
 	private void stop(StoppableArtifact artifact, boolean recursive) {
+		long started = System.nanoTime();
 		try {
 			if (!(artifact instanceof StartableArtifact) || ((StartableArtifact) artifact).isStarted()) {
 				// first halt
@@ -1099,6 +1116,12 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 		catch (Exception e) {
 			logger.error("Error while stopping " + artifact.getClass().getSimpleName() + ": " + artifact.getId(), e);
 			EAIRepositoryUtils.message(repository, artifact.getId(), "stop", true, EAIRepositoryUtils.toValidation(e));
+		}
+		finally {
+			long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+			if (elapsed >= Long.getLong("reload.slow.phase.threshold", 5000L).longValue()) {
+				logger.warn("Slow stop id={} recursive={} elapsedMs={} (wall elapsed including dependent stops)", artifact.getId(), recursive, elapsed);
+			}
 		}
 	}
 
@@ -1775,8 +1798,18 @@ public class Server implements NamedServiceRunner, ClusteredServiceRunner, Clust
 			fragmentIndexService = new FragmentIndexService(repository, new FileSystemFragmentIndexBackend(MCPUtils.getFragmentsPath()));
 			logger.info("Using filesystem fragment index backend: " + folder);
 		}
+		logger.info("Initializing fragment index backend");
 		fragmentIndexService.initialize();
+		logger.info("Fragment index backend initialized; rebuilding index");
 		fragmentIndexService.rebuild();
+		logger.info("Fragment index rebuild complete; subscribing to repository events");
+		repository.getEventDispatcher().subscribe(RepositoryEvent.class, new EventHandler<RepositoryEvent, Void>() {
+			@Override
+			public Void handle(RepositoryEvent event) {
+				fragmentIndexService.handle(event);
+				return null;
+			}
+		});
 		repository.getEventDispatcher().subscribe(NodeEvent.class, new EventHandler<NodeEvent, Void>() {
 			@Override
 			public Void handle(NodeEvent event) {

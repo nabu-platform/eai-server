@@ -8,8 +8,9 @@ public interface FragmentIndexBackend {
 
 	public void initialize();
 	public void beginRebuild();
-	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments);
+	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments, List<String> paths);
 	public void finalizeRebuild();
+	public void abortRebuild();
 	public void delete(String artifactId);
 	public FragmentSearch get(String artifactId, String path);
 	public List<FragmentSearch> get(List<String> artifactIds, List<String> paths);

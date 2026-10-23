@@ -60,7 +60,6 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 	@Override
 	public void beginRebuild() {
 		synchronized (registryLock) {
-			rebuilding = true;
 			if (registry == null) {
 				Path registryFile = registryFile();
 				try {
@@ -71,20 +70,29 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 					throw new RuntimeException(e);
 				}
 			}
+			rebuilding = true;
 			seenArtifacts = new HashSet<String>();
 			touchedFragments = new HashSet<String>();
 		}
 	}
 
 	@Override
-	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments) {
+	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments, List<String> paths) {
 		synchronized (registryLock) {
 			Path artifactRoot = artifactRoot(artifactId);
 			try {
+				if (registry == null) {
+					registry = new LinkedHashMap<String, String>(loadRegistry(registryFile()));
+					registryAvailable = Files.exists(registryFile());
+				}
 				Files.createDirectories(artifactRoot);
-				deleteMissing(artifactId, artifactRoot, fragments);
+				deleteMissing(artifactId, artifactRoot, paths);
 				for (ArtifactFragment fragment : fragments) {
 					writeFragment(artifactId, artifactRoot, artifactType, artifactCategory, fragment);
+				}
+				if (!rebuilding) {
+					writeRegistry(registryFile(), registry);
+					registryAvailable = true;
 				}
 			}
 			catch (IOException e) {
@@ -129,11 +137,19 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 				throw new RuntimeException(e);
 			}
 			finally {
-				seenArtifacts = null;
-				touchedFragments = null;
-				rebuilding = false;
-				registryAvailable = true;
+				abortRebuild();
 			}
+		}
+	}
+
+	@Override
+	public void abortRebuild() {
+		synchronized (registryLock) {
+			seenArtifacts = null;
+			touchedFragments = null;
+			rebuilding = false;
+			registry = null;
+			registryAvailable = false;
 		}
 	}
 
@@ -142,14 +158,25 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		synchronized (registryLock) {
 			Path artifactRoot = artifactRoot(artifactId);
 			try {
+				if (registry == null) {
+					registry = new LinkedHashMap<String, String>(loadRegistry(registryFile()));
+					registryAvailable = Files.exists(registryFile());
+				}
 				deleteRecursively(artifactRoot);
-				removeArtifactEntries(registry, artifactId);
-				if (!rebuilding) {
+				boolean changed = false;
+				for (String key : new ArrayList<String>(registry.keySet())) {
+					if (isArtifactRegistryKey(key, artifactId)) {
+						registry.remove(key);
+						changed = true;
+					}
+				}
+				if (!rebuilding && changed) {
 					writeRegistry(registryFile(), registry);
 					registryAvailable = true;
 				}
 			}
 			catch (IOException e) {
+				registry = null;
 				throw new RuntimeException(e);
 			}
 		}
@@ -443,28 +470,21 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		if (touchedFragments != null) {
 			touchedFragments.add(registryKey);
 		}
-		String registryMarker = registry.get(registryKey);
-		String marker = marker(fragment);
-		if (marker != null && Files.exists(file) && marker.equals(registryMarker)) {
-			registry.put(registryKey, marker);
-			return;
-		}
 		String contentValue = fragment.getContent();
 		String content = contentValue == null ? "" : contentValue;
 		String hash = hash(content);
 		String fallbackMarker = marker(fragment, hash);
-		if (Files.exists(file) && fallbackMarker.equals(registryMarker)) {
+		if (Files.exists(file) && Files.exists(propertiesFile) && hash.equals(loadProperties(propertiesFile).get("hash"))
+				&& fragmentProperties(artifactType, artifactCategory, fragment, hash).equals(loadProperties(propertiesFile))) {
 			registry.put(registryKey, fallbackMarker);
 			return;
 		}
 		Map<String, String> values = fragmentProperties(artifactType, artifactCategory, fragment, hash);
-		Files.write(file, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+		if (!Files.exists(file) || !Files.exists(propertiesFile) || !hash.equals(loadProperties(propertiesFile).get("hash"))) {
+			Files.write(file, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+		}
 		writeProperties(propertiesFile, values);
 		registry.put(registryKey, fallbackMarker);
-		if (!rebuilding) {
-			writeRegistry(registryFile(), registry);
-			registryAvailable = true;
-		}
 	}
 
 	private Map<String, String> fragmentProperties(String artifactType, String artifactCategory, ArtifactFragment fragment, String hash) {
@@ -494,7 +514,7 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		return loadMap(path);
 	}
 
-	private void writeRegistry(Path path, Map<String, String> values) throws IOException {
+	protected void writeRegistry(Path path, Map<String, String> values) throws IOException {
 		writeMap(path, values);
 	}
 
@@ -521,8 +541,15 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 				properties.setProperty(entry.getKey(), entry.getValue());
 			}
 		}
-		try (java.io.OutputStream output = Files.newOutputStream(path, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-			properties.store(output, null);
+		Path temporary = Files.createTempFile(path.getParent(), path.getFileName().toString(), ".tmp");
+		try {
+			try (java.io.OutputStream output = Files.newOutputStream(temporary)) {
+				properties.store(output, null);
+			}
+			Files.move(temporary, path, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		}
+		finally {
+			Files.deleteIfExists(temporary);
 		}
 	}
 
@@ -542,18 +569,21 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		}
 	}
 
-	private void deleteMissing(String artifactId, Path artifactRoot, List<ArtifactFragment> fragments) throws IOException {
+	private void deleteMissing(String artifactId, Path artifactRoot, List<String> paths) throws IOException {
 		if (seenArtifacts != null) {
 			seenArtifacts.add(artifactId);
+			for (String path : paths) {
+				touchedFragments.add(registryKey(artifactId, path));
+			}
 		}
 		if (rebuilding && !registryAvailable) {
-			deleteMissingLegacy(artifactRoot, fragments);
+			deleteMissingLegacy(artifactRoot, paths);
 			return;
 		}
 		if (!rebuilding) {
 			Set<String> current = new HashSet<String>();
-			for (ArtifactFragment fragment : fragments) {
-				current.add(registryKey(artifactId, fragment.getPath()));
+			for (String path : paths) {
+				current.add(registryKey(artifactId, path));
 			}
 			for (String key : new ArrayList<String>(registry.keySet())) {
 				if (!isArtifactRegistryKey(key, artifactId) || current.contains(key)) {
@@ -566,15 +596,13 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 				deleteEmptyParents(file.getParent(), artifactRoot);
 				registry.remove(key);
 			}
-			writeRegistry(registryFile(), registry);
-			registryAvailable = true;
 		}
 	}
 
-	private void deleteMissingLegacy(Path artifactRoot, List<ArtifactFragment> fragments) throws IOException {
+	private void deleteMissingLegacy(Path artifactRoot, List<String> paths) throws IOException {
 		List<Path> keep = new ArrayList<Path>();
-		for (ArtifactFragment fragment : fragments) {
-			Path fragmentFile = artifactRoot.resolve(fragment.getPath());
+		for (String path : paths) {
+			Path fragmentFile = artifactRoot.resolve(path);
 			keep.add(fragmentFile);
 			keep.add(propertiesFile(fragmentFile));
 		}

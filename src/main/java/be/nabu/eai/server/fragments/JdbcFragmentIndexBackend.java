@@ -57,18 +57,23 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		try {
 			rebuildConnection = dataSource.getConnection();
 			rebuildConnection.setAutoCommit(false);
+			try (Statement clear = rebuildConnection.createStatement()) {
+				clear.executeUpdate("delete from fragment_index");
+			}
 			rebuildUpsert = rebuildConnection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, artifact_category, fragment_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, artifact_category = source.artifact_category, fragment_type = source.fragment_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, artifact_category, fragment_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.artifact_category, source.fragment_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
 		}
 		catch (SQLException e) {
+			abortRebuild();
 			throw new RuntimeException(e);
 		}
 	}
 
 	@Override
-	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments) {
+	public void index(String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments, List<String> paths) {
 		if (rebuildConnection != null) {
 			try {
-				indexBatch(rebuildConnection, rebuildUpsert, artifactId, artifactType, artifactCategory, version, fragments, true);
+				deleteMissing(rebuildConnection, artifactId, paths);
+				indexBatch(rebuildConnection, rebuildUpsert, artifactId, artifactType, artifactCategory, version, fragments, false);
 			}
 			catch (SQLException e) {
 				rollback(rebuildConnection);
@@ -82,7 +87,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		try {
 			connection = dataSource.getConnection();
 			connection.setAutoCommit(false);
-			deleteMissing(connection, artifactId, fragments);
+			deleteMissing(connection, artifactId, paths);
 			upsert = connection.prepareStatement("MERGE INTO fragment_index AS target USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source (artifact_id, version, path, artifact_type, artifact_category, fragment_type, content_type, content, properties, content_hash, editable, removable) ON target.artifact_id = source.artifact_id AND target.path = source.path WHEN MATCHED THEN UPDATE SET version = source.version, artifact_type = source.artifact_type, artifact_category = source.artifact_category, fragment_type = source.fragment_type, content_type = source.content_type, content = source.content, properties = source.properties, content_hash = source.content_hash, editable = source.editable, removable = source.removable WHEN NOT MATCHED THEN INSERT (artifact_id, version, path, artifact_type, artifact_category, fragment_type, content_type, content, properties, content_hash, editable, removable) VALUES (source.artifact_id, source.version, source.path, source.artifact_type, source.artifact_category, source.fragment_type, source.content_type, source.content, source.properties, source.content_hash, source.editable, source.removable)");
 			indexBatch(connection, upsert, artifactId, artifactType, artifactCategory, version, fragments, false);
 			connection.commit();
@@ -122,7 +127,29 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	}
 
 	@Override
+	public void abortRebuild() {
+		if (rebuildConnection != null) {
+			rollback(rebuildConnection);
+			close(rebuildUpsert);
+			resetAutoCommit(rebuildConnection);
+			close(rebuildConnection);
+			rebuildUpsert = null;
+			rebuildConnection = null;
+		}
+	}
+
+	@Override
 	public void delete(String artifactId) {
+		if (rebuildConnection != null) {
+			try (PreparedStatement statement = rebuildConnection.prepareStatement("delete from fragment_index where artifact_id = ?")) {
+				statement.setString(1, artifactId);
+				statement.executeUpdate();
+				return;
+			}
+			catch (SQLException e) {
+				throw new RuntimeException(e);
+			}
+		}
 		Connection connection = null;
 		PreparedStatement statement = null;
 		try {
@@ -385,7 +412,8 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 	private void indexBatch(Connection connection, PreparedStatement upsert, String artifactId, String artifactType, String artifactCategory, long version, List<ArtifactFragment> fragments, boolean batchCommit) throws SQLException {
 		int pending = 0;
 		for (ArtifactFragment fragment : fragments) {
-			String hash = hash(fragment.getContent());
+			String content = fragment.getContent();
+			String hash = hash(content);
 			upsert.setString(1, artifactId);
 			upsert.setLong(2, version);
 			upsert.setString(3, fragment.getPath());
@@ -393,7 +421,7 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 			upsert.setString(5, artifactCategory);
 			upsert.setString(6, fragment.getFragmentType());
 			upsert.setString(7, fragment.getContentType());
-			upsert.setString(8, fragment.getContent());
+			upsert.setString(8, content);
 			upsert.setString(9, serializeProperties(fragment.getProperties()));
 			upsert.setString(10, hash);
 			upsert.setBoolean(11, fragment.isEditable());
@@ -413,18 +441,18 @@ public class JdbcFragmentIndexBackend implements FragmentIndexBackend {
 		}
 	}
 
-	private void deleteMissing(Connection connection, String artifactId, List<ArtifactFragment> fragments) throws SQLException {
+	private void deleteMissing(Connection connection, String artifactId, List<String> paths) throws SQLException {
 		PreparedStatement delete = null;
 		try {
-			if (fragments.isEmpty()) {
+			if (paths.isEmpty()) {
 				delete = connection.prepareStatement("delete from fragment_index where artifact_id = ?");
 				delete.setString(1, artifactId);
 			}
 			else {
-				delete = connection.prepareStatement("delete from fragment_index where artifact_id = ? and path not in (" + placeholders(fragments.size()) + ")");
+				delete = connection.prepareStatement("delete from fragment_index where artifact_id = ? and path not in (" + placeholders(paths.size()) + ")");
 				delete.setString(1, artifactId);
-				for (int i = 0; i < fragments.size(); i++) {
-					delete.setString(i + 2, fragments.get(i).getPath());
+				for (int i = 0; i < paths.size(); i++) {
+					delete.setString(i + 2, paths.get(i));
 				}
 			}
 			delete.executeUpdate();
