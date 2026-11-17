@@ -37,6 +37,7 @@ A datamodel to view these structures is added as <project>.databases.<name>.mode
 We always create structures first, then generate the tables from there.
 
 Rules:
+- Prefer Blox services when possible; use Glue services only when Blox cannot meet the need.
 - Avoid circular dependency chains between projects.
 - Prefer small, composable artifacts over large multi-purpose ones. Large artifacts are harder to review, reuse, test, and evolve safely.
 - Be mindful of backwards compatibility when updating existing artifacts. notify the user if something will break.

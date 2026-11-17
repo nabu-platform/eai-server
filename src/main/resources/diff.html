@@ -4,21 +4,23 @@
 		<meta charset="utf-8"/>
 		<title>diff</title>
 		<style>
-body {
-	--diff-accent-bg: var(--color-background-info, #1f2a3a);
-	--diff-accent-fg: var(--color-text-warning, #9cc3ff);
-	--diff-code-comment: var(--color-text-secondary, #9aa092);
-	--diff-code-punctuation: var(--color-text-primary, #e5e5dd);
-	--diff-code-constant: #f2a45d;
-	--diff-code-tag: #6fd6c2;
-	--diff-code-number: #f0c169;
-	--diff-code-string: #87d97a;
-	--diff-code-operator: var(--color-text-primary, #d4d8df);
-	--diff-code-keyword: #b6a6ff;
-	--diff-code-entity: #72c2ff;
-	--diff-code-variable: #f2a2e8;
-	--diff-code-attr-name: #7dd3e8;
-	--diff-code-attr-value: #ffd28a;
+@layer mcp-default {
+	:root {
+		--diff-accent-bg: var(--color-background-info, #1f2a3a);
+		--diff-accent-fg: var(--color-text-warning, #9cc3ff);
+		--diff-code-comment: var(--color-text-secondary, #9aa092);
+		--diff-code-punctuation: var(--color-text-primary, #e5e5dd);
+		--diff-code-constant: #f2a45d;
+		--diff-code-tag: #6fd6c2;
+		--diff-code-number: #f0c169;
+		--diff-code-string: #87d97a;
+		--diff-code-operator: var(--color-text-primary, #d4d8df);
+		--diff-code-keyword: #b6a6ff;
+		--diff-code-entity: #72c2ff;
+		--diff-code-variable: #f2a2e8;
+		--diff-code-attr-name: #7dd3e8;
+		--diff-code-attr-value: #ffd28a;
+	}
 }
 
 body {
