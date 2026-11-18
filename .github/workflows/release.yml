@@ -25,6 +25,9 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      - name: Install ripgrep for fragment index tests
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Configure Maven GitHub access
         shell: bash
         run: |
