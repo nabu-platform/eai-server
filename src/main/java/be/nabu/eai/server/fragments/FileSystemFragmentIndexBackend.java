@@ -330,6 +330,9 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 				continue;
 			}
 			Path artifactRoot = resolveArtifactRoot(file);
+			if (artifactRoot == null) {
+				continue;
+			}
 			Map<String, String> fragment = loadProperties(propertiesFile(file));
 			Map<String, String> properties = new LinkedHashMap<String, String>(fragment);
 			properties.remove("hash");
@@ -358,6 +361,9 @@ public class FileSystemFragmentIndexBackend implements FragmentIndexBackend {
 		List<FragmentSearch> results = new ArrayList<FragmentSearch>();
 		for (Path file : files) {
 			Path artifactRoot = resolveArtifactRoot(file);
+			if (artifactRoot == null) {
+				continue;
+			}
 			FragmentSearch fragment = toFragmentSearch(file, artifactRoot, null);
 			if (fragment == null) {
 				continue;

@@ -1,5 +1,6 @@
 package be.nabu.eai.server;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -30,6 +31,19 @@ public class FragmentIndexBackendTest extends TestCase {
 		restarted.index("app", "web", "category", 3, Collections.<ArtifactFragment>emptyList(), Collections.singletonList("first"));
 		restarted.finalizeRebuild();
 		assertNotNull(restarted.get("app", "first"));
+	}
+
+	public void testRegistryTemporaryFileIsNotAFragment() throws Exception {
+		Path root = Files.createTempDirectory("fragment-index-test");
+		FileSystemFragmentIndexBackend backend = new FileSystemFragmentIndexBackend(root);
+		backend.initialize();
+		backend.index("app", "web", "category", 1, Collections.singletonList(fragment("first", "needle", false)), Collections.singletonList("first"));
+		Files.write(root.resolve("artifact-index.properties123.tmp"), Collections.singletonList("needle"), StandardCharsets.UTF_8);
+
+		assertEquals(1, backend.list(null, null, null, null).size());
+		assertEquals("first", backend.list(null, null, null, null).get(0).getPath());
+		assertEquals(1, backend.search("needle", null, null, null, null, false, 0, 0, 0).size());
+		assertEquals("first", backend.search("needle", null, null, null, null, false, 0, 0, 0).get(0).getPath());
 	}
 
 	private ArtifactFragment fragment(final String path, final String content, final boolean editable) {
